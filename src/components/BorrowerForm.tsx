@@ -42,9 +42,9 @@ export const BorrowerForm = ({ onSubmit, isLoading = false }: BorrowerFormProps)
       newErrors.requiredAmount = 'Loan amount must be at least ₹1,00,000';
     }
 
-    if (formData.requiredAmount > 50000000) {
-      newErrors.requiredAmount = 'Loan amount cannot exceed ₹5 Crore';
-    }
+    if (formData.requiredAmount && formData.requiredAmount > 50000000) {
+  newErrors.requiredAmount = 'Loan amount cannot exceed ₹5 Crore';
+}
 
     if (!formData.tenureMonths) {
       newErrors.tenureMonths = 'Please select a tenure';

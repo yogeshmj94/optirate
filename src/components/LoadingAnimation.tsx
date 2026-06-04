@@ -46,7 +46,7 @@ export const LoadingAnimation = ({ steps, currentStep }: LoadingStepProps) => {
 
       <div className="mt-8 pt-6 border-t border-slate-700">
         <p className="text-xs text-slate-400 text-center">
-          This typically takes 4-5 seconds. We're broadcasting your anonymized profile to 12 partner lenders.
+          This typically takes 4-5 seconds. We&apos;re broadcasting your anonymized profile to 12 partner lenders.
         </p>
       </div>
     </div>

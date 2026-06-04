@@ -47,7 +47,7 @@ export default function Home() {
               <div className="mb-8">
                 <h2 className="text-2xl font-bold text-white mb-2">Find Your Best Loan Rate</h2>
                 <p className="text-slate-400">
-                  Enter your details below. We'll instantly auction your loan across 12+ partner lenders
+                  Enter your details below. We&apos;ll instantly auction your loan across 12+ partner lenders
                   and show you the best rates in real-time.
                 </p>
               </div>

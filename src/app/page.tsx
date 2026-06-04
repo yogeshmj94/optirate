@@ -54,7 +54,7 @@ export default function Home() {
               <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-8">
                 <BorrowerForm
                   onSubmit={auction.submitAuction}
-                  isLoading={auction.state === 'loading'}
+                  isLoading={(auction.state as string) === 'loading'}
                 />
               </div>
             </div>

@@ -147,11 +147,12 @@ export const BorrowerForm = ({ onSubmit, isLoading = false }: BorrowerFormProps)
           <div className="text-right min-w-fit">
             <div className="text-2xl font-bold text-primary-400">{formData.creditScore}</div>
             <div className="text-xs text-slate-400">
-              {formData.creditScore >= 750
-                ? '🟢 Excellent'
-                : formData.creditScore >= 700
-                ? '🟡 Good'
-                : '🔴 Fair'}
+              {/* Replace your current ternary block with this safety fallback */}
+{(formData.creditScore ?? 0) >= 750
+  ? '🟢 Excellent'
+  : (formData.creditScore ?? 0) >= 700
+  ? '🟡 Good'
+  : '🔴 Standard'} {/* Note: Keep whatever your original final fallback string or closing logic was here */}
             </div>
           </div>
         </div>

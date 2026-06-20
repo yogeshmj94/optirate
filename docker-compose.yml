@@ -1,0 +1,27 @@
+version: "3.8"
+services:
+  fineract-db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+      POSTGRES_DB: fineract_default
+    ports:
+      - "5432:5432"
+    volumes:
+      - fineract-db-data:/var/lib/postgresql/data
+
+  fineract-server:
+    image: apache/fineract:latest
+    depends_on:
+      - fineract-db
+    environment:
+      - FINERACT_DEFAULT_TENANTDB_HOSTNAME=fineract-db
+      - FINERACT_DEFAULT_TENANTDB_PORT=5432
+      - FINERACT_DEFAULT_TENANTDB_UID=postgres
+      - FINERACT_DEFAULT_TENANTDB_PWD=postgres_password
+    ports:
+      - "8443:8443"
+
+volumes:
+  fineract-db-data:

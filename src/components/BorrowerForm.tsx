@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { BorrowerProfile } from '@/types/lending';
-import { getPrimeTestProfile } from '@/services/auctionService';
 
 interface BorrowerFormProps {
   onSubmit: (profile: BorrowerProfile) => void;
@@ -72,18 +71,6 @@ export const BorrowerForm = ({ onSubmit, isLoading = false }: BorrowerFormProps)
       });
     }
   };
-
-  const handlePrefillPrime = () => {
-    const primeProfile = getPrimeTestProfile();
-    setFormData({
-      fullName: primeProfile.fullName,
-      creditScore: primeProfile.creditScore,
-      requiredAmount: primeProfile.requiredAmount,
-      tenureMonths: primeProfile.tenureMonths,
-    });
-    setErrors({});
-  };
-
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -176,7 +163,6 @@ export const BorrowerForm = ({ onSubmit, isLoading = false }: BorrowerFormProps)
             onChange={handleChange}
             disabled={isLoading}
             min="100000"
-            step="100000"
             className={`w-full pl-8 pr-4 py-3 rounded-lg bg-slate-800 border text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all ${
               errors.requiredAmount ? 'border-red-500' : 'border-slate-700'
             } disabled:opacity-50 disabled:cursor-not-allowed`}
@@ -217,17 +203,7 @@ export const BorrowerForm = ({ onSubmit, isLoading = false }: BorrowerFormProps)
         )}
       </div>
 
-      {/* Prime Profile Prefill Button */}
-      <div>
-        <button
-          type="button"
-          onClick={handlePrefillPrime}
-          disabled={isLoading}
-          className="w-full px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-slate-600"
-        >
-          ✨ Pre-fill Prime Profile (Score: 783, ₹5 Lacs)
-        </button>
-      </div>
+     
 
       {/* Submit Button */}
       <button

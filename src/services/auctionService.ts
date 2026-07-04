@@ -1,198 +1,193 @@
-import { LoanBid, AuctionResponse } from '@/types/lending';
-import { calculateAPRAndEMI } from '@/lib/aprCalculator';
+import { BankSchemaAdapter, StandardBorrowerProfile } from './bankAdapterService';
+import { LoanBid } from '../types/lending';
 
-/**
- * Mock Lender Data
- * Represents 12 partner lenders with varying strategies
- */
-const mockLenders = [
-  {
-    id: 'lender_001',
-    name: 'HDFC Bank',
-    logo: '🏦',
-    baseRates: { excellent: 8.5, good: 9.5, prime: 10.5 },
-    processingFeeRange: [1.5, 2.5],
-  },
-  {
-    id: 'lender_002',
-    name: 'ICICI Bank',
-    logo: '🏦',
-    baseRates: { excellent: 8.75, good: 9.75, prime: 10.75 },
-    processingFeeRange: [1.75, 2.75],
-  },
-  {
-    id: 'lender_003',
-    name: 'Axis Bank',
-    logo: '🏦',
-    baseRates: { excellent: 8.9, good: 9.9, prime: 10.9 },
-    processingFeeRange: [1.5, 2.5],
-  },
-  {
-    id: 'lender_004',
-    name: 'Kotak Mahindra Bank',
-    logo: '🏦',
-    baseRates: { excellent: 9.0, good: 10.0, prime: 11.0 },
-    processingFeeRange: [2.0, 3.0],
-  },
-  {
-    id: 'lender_005',
-    name: 'Yes Bank',
-    logo: '🏦',
-    baseRates: { excellent: 9.25, good: 10.25, prime: 11.25 },
-    processingFeeRange: [1.75, 2.75],
-  },
-  {
-    id: 'lender_006',
-    name: 'IDFC First Bank',
-    logo: '🏦',
-    baseRates: { excellent: 8.6, good: 9.6, prime: 10.6 },
-    processingFeeRange: [1.5, 2.5],
-  },
-  {
-    id: 'lender_007',
-    name: 'Federal Bank',
-    logo: '🏦',
-    baseRates: { excellent: 9.1, good: 10.1, prime: 11.1 },
-    processingFeeRange: [2.0, 3.0],
-  },
-  {
-    id: 'lender_008',
-    name: 'RBL Bank',
-    logo: '🏦',
-    baseRates: { excellent: 9.3, good: 10.3, prime: 11.3 },
-    processingFeeRange: [2.25, 3.25],
-  },
-  {
-    id: 'lender_009',
-    name: 'Bajaj Finance',
-    logo: '💰',
-    baseRates: { excellent: 10.0, good: 11.0, prime: 12.0 },
-    processingFeeRange: [1.0, 2.0],
-  },
-  {
-    id: 'lender_010',
-    name: 'HDFC Finance',
-    logo: '💰',
-    baseRates: { excellent: 10.25, good: 11.25, prime: 12.25 },
-    processingFeeRange: [1.5, 2.5],
-  },
-  {
-    id: 'lender_011',
-    name: 'Flex Finance',
-    logo: '💰',
-    baseRates: { excellent: 11.0, good: 12.0, prime: 13.0 },
-    processingFeeRange: [2.0, 3.0],
-  },
-  {
-    id: 'lender_012',
-    name: 'Digital Credit Co.',
-    logo: '📱',
-    baseRates: { excellent: 9.5, good: 10.5, prime: 11.5 },
-    processingFeeRange: [0.5, 1.5],
-  },
+// Internal mathematical helper for EMI computations (used as a fallback)
+const calculateEMI = (principal: number, annualRate: number, months: number): number => {
+  if (annualRate === 0) return principal / months;
+  const monthlyRate = annualRate / 12 / 100;
+  return (
+    (principal * monthlyRate * Math.pow(1 + monthlyRate, months)) /
+    (Math.pow(1 + monthlyRate, months) - 1)
+  );
+};
+
+// Define internal properties for simulated remote fallback rules
+const INTERNAL_BANK_METADATA = [
+  { id: 'lender_01', name: 'IDFC First Bank', baseRate: 10.25, feePercent: 0.5, probability: 0.85 },
+  { id: 'lender_02', name: 'Navi Finserv', baseRate: 9.90, feePercent: 0.0, probability: 0.70 },
+  { id: 'lender_03', name: 'Kotak Mahindra Bank', baseRate: 10.75, feePercent: 0.8, probability: 0.80 }
 ];
 
-/**
- * Determine credit tier based on score
- */
-const getCreditTier = (creditScore: number): 'excellent' | 'good' | 'prime' => {
-  if (creditScore >= 750) return 'excellent';
-  if (creditScore >= 700) return 'good';
-  return 'prime';
+// -----------------------------------------------------------------------------
+// WIREMOCK API CONFIGURATION
+// Replace the placeholder URLs below with your actual WireMock endpoint links!
+// -----------------------------------------------------------------------------
+const WIREMOCK_ENDPOINTS: Record<string, string> = {
+  'lender_01': 'https://91154.wiremockapi.cloud/api/idfc/underwrite',     // IDFC First Bank WireMock Link
+  'lender_02': 'https://gddm9.wiremockapi.cloud/api/navi/underwrite',     // Navi Finserv WireMock Link
+  'lender_03': 'https://766w3.wiremockapi.cloud/api/kotak/underwrite',   // Kotak Mahindra Bank WireMock Link
 };
 
-/**
- * Generate mock bids for an auction request
- * Simulates competitive bidding from lenders
- */
-export const generateMockBids = (
-  borrowerId: string,
-  loanAmount: number,
-  tenureMonths: number,
-  creditScore: number
-): LoanBid[] => {
-  const tier = getCreditTier(creditScore);
-  const bids: LoanBid[] = [];
+export async function runReverseAuction(
+  principalAmount: number, 
+  tenureMonths: number, 
+  creditScore: number,
+  monthlyIncome: number = 100000,
+  monthlyExpense: number = 30000
+): Promise<LoanBid[]> {
+  
+  // Dynamic network connection handshake emulation
+  await new Promise((resolve) => setTimeout(resolve, 2000));
 
-  // Generate bids from all lenders with some randomness
-  mockLenders.forEach((lender) => {
-    const baseRate = lender.baseRates[tier];
-    const feeMin = lender.processingFeeRange[0];
-    const feeMax = lender.processingFeeRange[1];
-    
-    // Add slight randomness to simulate competitive bidding
-    const rateVariation = (Math.random() - 0.5) * 0.5; // ±0.25%
-    const feeVariation = Math.random() * (feeMax - feeMin) + feeMin;
-    const adjustedBaseRate = baseRate + rateVariation;
-    
-    const calculation = calculateAPRAndEMI({
-      baseInterestRate: adjustedBaseRate,
-      processingFeePercent: feeVariation,
-      loanAmount,
-      tenureMonths,
-    });
-    
-    bids.push({
-      id: `bid_${lender.id}_${borrowerId}`,
-      lenderName: lender.name,
-      lenderLogo: lender.logo,
-      baseInterestRate: parseFloat(adjustedBaseRate.toFixed(2)),
-      processingFeePercent: parseFloat(feeVariation.toFixed(2)),
-      calculatedAPR: calculation.calculatedAPR,
-      monthlyEMI: calculation.monthlyEMI,
-      totalPayout: calculation.totalPayout,
-      rank: 0, // Will be set after sorting
-    });
-  });
+  // Pack standard user criteria matching standard profiles
+  const platformProfile: StandardBorrowerProfile = {
+    fullName: "Borrower Profile Summary",
+    requiredAmount: principalAmount,
+    tenureMonths: tenureMonths,
+    creditScore: creditScore,
+    monthlyIncome: monthlyIncome,
+    monthlyExpense: monthlyExpense
+  };
 
-  // Sort by APR (lowest first = best for borrower)
-  bids.sort((a, b) => a.calculatedAPR - b.calculatedAPR);
+  console.log(`\n=================== Reverse-Auction Broadcast Engine ===================`);
+  console.log(`📡 Dispatched Criteria: Amount: ₹${principalAmount.toLocaleString()}, score: ${creditScore}, Income: ₹${monthlyIncome.toLocaleString()}`);
 
-  // Assign ranks
-  bids.forEach((bid, index) => {
-    bid.rank = index + 1;
-  });
+  // Use Promise.all to map the API requests concurrently so we execute fetches in parallel
+  const bids: LoanBid[] = await Promise.all(
+    INTERNAL_BANK_METADATA.map(async (bank) => {
+      
+      // Step 1: Mapping outbound payload to target vendor schema dynamically using your Adapter
+      const customBankPayload = BankSchemaAdapter.toBankRequestPayload(bank.id, {
+        ...platformProfile,
+        fullName: bank.id === 'lender_01' ? 'IDFC CLIENT' : 'Navi Client'
+      });
 
-  return bids;
-};
+      console.log(`\n💼 1. Mapped Payload Outbound for: ${bank.name}`);
+      console.log(JSON.stringify(customBankPayload, null, 2));
 
-/**
- * Simulate complete auction response with delay
- * Creates immersion by taking 4-5 seconds
- */
-export const simulateAuctionRequest = async (
-  borrowerId: string,
-  borrowerName: string,
-  loanAmount: number,
-  tenureMonths: number,
-  creditScore: number
-): Promise<AuctionResponse> => {
-  // Simulate network delay: 4-5 seconds for immersion
-  const delayMs = 4000 + Math.random() * 1000;
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
+      let mockBankResponse: any = null;
+      let usedWireMock = false;
+      const wiremockUrl = WIREMOCK_ENDPOINTS[bank.id];
 
-  const bids = generateMockBids(
-    borrowerId,
-    loanAmount,
-    tenureMonths,
-    creditScore
+      // Step 2: Dispatch actual WireMock API HTTP call if user configured a valid URL
+      if (wiremockUrl && !wiremockUrl.includes('your-wiremock-id')) {
+        try {
+          console.log(`🚀 Sending POST request to WireMock for ${bank.name}... Url: ${wiremockUrl}`);
+          const response = await fetch(wiremockUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify(customBankPayload)
+          });
+
+          if (response.ok) {
+            mockBankResponse = await response.json();
+            usedWireMock = true;
+            console.log(`📡 [WireMock SUCCESS] Received custom native response from ${bank.name}:`);
+            console.log(JSON.stringify(mockBankResponse, null, 2));
+          } else {
+            console.warn(`⚠️ WireMock endpoint returned status ${response.status}. Falling back to internal engine.`);
+          }
+        } catch (error) {
+          console.warn(`⚠️ Network connection failed for WireMock: ${bank.name}. Using default fallback simulation.`);
+        }
+      }
+
+      // Fallback: If WireMock is not configured or fails, simulate native responses locally
+      if (!usedWireMock) {
+        let isApproved = Math.random() < bank.probability && creditScore > 650;
+        const riskPremium = creditScore > 750 ? 0 : (750 - creditScore) * 0.025;
+        const finalRate = bank.baseRate + riskPremium;
+
+        const proposedEMI = calculateEMI(principalAmount, finalRate, tenureMonths);
+        const dtiRatio = (monthlyExpense + proposedEMI) / Math.max(1, monthlyIncome);
+
+        // Underwrite restriction: surge failure if debt obligations cross 55%
+        if (dtiRatio > 0.55) {
+          isApproved = false;
+        }
+
+        if (bank.id === 'lender_01') {
+          mockBankResponse = {
+            TX_STATUS: isApproved ? 'APRVD' : 'REJTD',
+            RATE_ANN_PCT: parseFloat(finalRate.toFixed(2)),
+            EMI_EST_MO_VAL: Math.round(proposedEMI),
+            FE_PROC_VAL: Math.round(principalAmount * (bank.feePercent / 100)),
+            OUTFLOW_TOT_VAL: Math.round((proposedEMI * tenureMonths) + (principalAmount * (bank.feePercent / 100)))
+          };
+        } else if (bank.id === 'lender_02') {
+          mockBankResponse = {
+            decisioning: {
+              verdict: isApproved ? 'ELIGIBLE' : 'INELIGIBLE',
+              pricing: isApproved ? {
+                aprPercent: parseFloat(finalRate.toFixed(2)),
+                monthlyPayment: Math.round(proposedEMI),
+                originationCharge: bank.feePercent,
+                aggregateOutflow: Math.round((proposedEMI * tenureMonths))
+              } : undefined
+            }
+          };
+        } else {
+          mockBankResponse = {
+            DEC_CODE: isApproved ? 'A01' : 'R01',
+            INT_R: isApproved ? parseFloat(finalRate.toFixed(2)) : undefined,
+            M_EMI: isApproved ? Math.round(proposedEMI) : undefined,
+            PF_PCT: isApproved ? bank.feePercent : undefined,
+            TOT_PAY: isApproved ? Math.round((proposedEMI * tenureMonths) + (principalAmount * (bank.feePercent / 100))) : undefined
+          };
+        }
+        console.log(`📥 2. [Local Fallback] response built for ${bank.name}:`);
+        console.log(JSON.stringify(mockBankResponse, null, 2));
+      }
+
+      // Step 3: Parse response through Adapter back to standard platform Model
+      const normalizedData = BankSchemaAdapter.toStandardBid(bank.id, mockBankResponse, principalAmount);
+
+      if (normalizedData.status === 'Rejected') {
+        return {
+          id: `bid_${bank.id}_${Date.now()}`,
+          lenderId: bank.id,
+          lenderName: bank.name,
+          baseInterestRate: 0,
+          processingFeePercent: 0,
+          calculatedAPR: 0,
+          monthlyEMI: 0,
+          totalPayout: 0,
+          rank: 999,
+          status: 'Rejected',
+        };
+      }
+
+      const calculatedAPR = normalizedData.interestRate + (normalizedData.feePercent / (tenureMonths / 12));
+
+      return {
+        id: `bid_${bank.id}_${Date.now()}`,
+        lenderId: bank.id,
+        lenderName: bank.name,
+        lenderLogo: `https://placehold.co/120x40/e2e8f0/1e293b?text=${bank.name.replace(/ /g, '+')}`,
+        baseInterestRate: normalizedData.interestRate,
+        processingFeePercent: normalizedData.feePercent,
+        calculatedAPR: parseFloat(calculatedAPR.toFixed(2)),
+        monthlyEMI: normalizedData.emi,
+        totalPayout: normalizedData.totalPayout,
+        rank: 0,
+        status: 'Approved',
+      };
+    })
   );
 
-  return {
-    borrowerId,
-    borrowerName,
-    requestedAmount: loanAmount,
-    tenure: tenureMonths,
-    bids,
-  };
-};
+  // Step 4: Filtering and ordering by cheapest APR
+  const approvedBids = bids.filter(bid => bid.status === 'Approved');
+  approvedBids.sort((a, b) => a.calculatedAPR - b.calculatedAPR);
 
-/**
- * Get a prime test profile for pre-filling
- */
-export const getPrimeTestProfile = () => ({
-  fullName: 'Amit Sharma',
-  creditScore: 783,
-  requiredAmount: 500000,
-  tenureMonths: 60,
-});
+  const rankedBids = approvedBids.map((bid, index) => ({
+    ...bid,
+    rank: index + 1
+  }));
+
+  console.log(`\n=================== Auction Translation Run Complete ===================\n`);
+
+  return rankedBids;
+}

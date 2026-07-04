@@ -1,17 +1,21 @@
-/**
- * Auction State Machine Hook
- * Manages the lifecycle: Form → Loading → Results
- */
-
 import { useState, useCallback } from 'react';
 import { BorrowerProfile, AuctionResponse } from '@/types/lending';
-import { simulateAuctionRequest } from '@/services/auctionService';
+import { runReverseAuction } from '@/services/auctionService';
+
+// We use Omit to remove the mandatory database-driven keys ('id' and 'createdAt')
+// and then declare them as optional so they are not required during form submission.
+export type ExtendedBorrowerProfile = Omit<BorrowerProfile, 'id' | 'createdAt'> & {
+  id?: string;
+  createdAt?: string;
+  monthlyIncome?: number;
+  monthlyExpense?: number;
+};
 
 export type AuctionState = 'idle' | 'loading' | 'success' | 'error';
 
 export interface AuctionStateData {
   state: AuctionState;
-  profile: BorrowerProfile | null;
+  profile: ExtendedBorrowerProfile | null;
   auctionResult: AuctionResponse | null;
   error: string | null;
   loadingSteps: string[];
@@ -19,10 +23,10 @@ export interface AuctionStateData {
 }
 
 const LOADING_STEPS = [
-  'Securing connection to FinBox Multi-Lender Sandbox Engine...',
+  'Securing connection to Multi-Lender Engine...',
   'Fetching Account Aggregator Bank Data...',
   'Parsing Risk Profile...',
-  'Broadcasting Anonymized Profile to 12 Partner Lenders...',
+  'Broadcasting Anonymized Profile to 10 Partner Lenders...',
 ];
 
 export const useAuctionState = () => {
@@ -36,7 +40,7 @@ export const useAuctionState = () => {
   });
 
   const submitAuction = useCallback(
-    async (profile: BorrowerProfile) => {
+    async (profile: ExtendedBorrowerProfile) => {
       setStateData((prev) => ({
         ...prev,
         state: 'loading',
@@ -45,7 +49,7 @@ export const useAuctionState = () => {
         error: null,
       }));
 
-      // Simulate step-by-step loading
+      // Simulate step-by-step progress feedback
       const stepInterval = setInterval(() => {
         setStateData((prev) => {
           const nextStep = prev.currentStep + 1;
@@ -58,13 +62,23 @@ export const useAuctionState = () => {
       }, 1000);
 
       try {
-        const result = await simulateAuctionRequest(
-          `borrower_${Date.now()}`,
-          profile.fullName,
+        // Pass the captured cash-flow parameters directly into the scoring service
+        const bids = await runReverseAuction(
           profile.requiredAmount,
           profile.tenureMonths,
-          profile.creditScore
+          profile.creditScore,
+          profile.monthlyIncome ?? 100000,
+          profile.monthlyExpense ?? 30000
         );
+
+        // Map the results back to the standard UI model
+        const result: AuctionResponse = {
+          borrowerId: profile.id || `borrower_${Date.now()}`,
+          borrowerName: profile.fullName,
+          requestedAmount: profile.requiredAmount,
+          tenure: profile.tenureMonths,
+          bids: bids,
+        };
 
         clearInterval(stepInterval);
 

@@ -13,7 +13,7 @@ export const TransparencyFooter = () => {
               <span className="text-slate-300 font-medium"> Lowest APR</span>
               {' | '}
               <span className="text-slate-300 font-medium">Privacy first platform</span>
-              . Only the lender who's bid you accept will know your details.
+              . Only the lender who&apos;s bid you accept will know your details.
             </p>
           </div>
         </div>

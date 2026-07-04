@@ -10,7 +10,7 @@ export const TraditionalBankAgreement: React.FC<AgreementProps> = ({ bidData }) 
   <div className="p-8 border-4 border-double border-gray-800 bg-stone-50 font-serif text-gray-900">
     <h2 className="text-2xl font-bold text-center mb-6 uppercase tracking-widest">Master Promissory Note</h2>
     <p className="mb-4 text-sm leading-relaxed text-justify">
-      THIS LOAN AGREEMENT (the "Agreement") is made and entered into, by and between the Borrower and 
+      THIS LOAN AGREEMENT (the &quot;Agreement&quot;) is made and entered into, by and between the Borrower and 
       <strong> {bidData.lenderName || 'The Institution'}</strong>. 
       The Borrower hereby promises to pay the principal sum, together with interest at the agreed Annual Percentage Rate 
       of <strong>{bidData.calculatedAPR}%</strong>.
@@ -46,7 +46,7 @@ export const FintechStartupAgreement: React.FC<AgreementProps> = ({ bidData }) =
       </div>
     </div>
     <p className="text-sm text-indigo-200 text-center">
-      By clicking "Digitally Sign" below, you agree to our electronic terms of service.
+      By clicking &quot;Digitally Sign&quot; below, you agree to our electronic terms of service.
     </p>
   </div>
 );

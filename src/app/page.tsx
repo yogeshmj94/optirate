@@ -312,7 +312,7 @@ export default function Home() {
         {currentStep === 1 && (
           <div className="bg-slate-950 border border-slate-800 p-8 rounded-2xl shadow-xl max-w-lg mx-auto w-full">
             <h2 className="text-xl font-bold text-slate-100 mb-2">Step 1: Verify Identity</h2>
-            <p className="text-xs text-slate-400 mb-6">Enter your permanent account number to verify your details in real-time via Setu's KYC engine.</p>
+            <p className="text-xs text-slate-400 mb-6">Enter your permanent account number to verify your details in real-time via Setu&apos;s KYC engine.</p>
             
             <form onSubmit={handleVerifyPAN} className="space-y-5">
               <div>
@@ -336,7 +336,7 @@ export default function Home() {
                   className="mt-1 accent-indigo-500"
                 />
                 <label htmlFor="consent" className="text-xs text-slate-400 leading-relaxed">
-                  I hereby authorize OptiRate to pull my name and address details from Setu's verified KYC registry to create an LSP profile.
+                  I hereby authorize OptiRate to pull my name and address details from Setu&apos;s verified KYC registry to create an LSP profile.
                 </label>
               </div>
 
@@ -366,7 +366,7 @@ export default function Home() {
             <div className="border border-slate-850 rounded-2xl bg-slate-900/30 p-6 text-left space-y-4 mb-6">
               <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400">Step 2: Link Statement via Account Aggregator</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                OptiRate runs deep bank analytics to calculate your secure debt obligations. Link your active bank statements securely using Setu's Account Aggregator gateway.
+                OptiRate runs deep bank analytics to calculate your secure debt obligations. Link your active bank statements securely using Setu&apos;s Account Aggregator gateway.
               </p>
               <div>
                 <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Registered Phone Number</label>
@@ -706,7 +706,7 @@ export default function Home() {
                     onChange={(e) => setWebviewOtp(e.target.value)}
                     className="w-full border border-slate-300 rounded-lg p-3 text-center font-mono text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-indigo-500" 
                   />
-                  <span className="text-[10px] text-indigo-600 mt-1 block">Tip: Enter standard sandbox OTP <strong>'123456'</strong></span>
+                  <span className="text-[10px] text-indigo-600 mt-1 block">Tip: Enter standard sandbox OTP <strong>&apos;123456&apos;</strong></span>
                 </div>
                 <button 
                   onClick={handleVerifyWebviewOtp}

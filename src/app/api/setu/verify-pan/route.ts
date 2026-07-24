@@ -1,4 +1,44 @@
 import { NextResponse } from 'next/server';
+import { buildPanProfileTransactions, calculateAdjustedSRI, calculateThermodynamicRiskMetrics, evaluateBorrowerRisk } from '@/services/riskEngine';
+
+const PAN_PROFILES: Record<string, { full_name: string; first_name: string; last_name: string; category: string; creditScore: number; isFirstTimeBorrower: boolean; monthlyIncome: number; monthlyExpense: number; sourceHash: string; behaviour: 'disciplined' | 'chaotic' | 'defaulter'; }> = {
+  ABCDE1234A: {
+    full_name: 'AAAAAA',
+    first_name: 'AAAAAA',
+    last_name: '',
+    category: 'Individual or Person',
+    creditScore: 660,
+    isFirstTimeBorrower: true,
+    monthlyIncome: 120000,
+    monthlyExpense: 42000,
+    sourceHash: 'TATA_EMPLOYER_CORP_HASH',
+    behaviour: 'disciplined',
+  },
+  ABCDE1234B: {
+    full_name: 'BBBBBB',
+    first_name: 'BBBBBB',
+    last_name: '',
+    category: 'Individual or Person',
+    creditScore: 850,
+    isFirstTimeBorrower: false,
+    monthlyIncome: 160000,
+    monthlyExpense: 60000,
+    sourceHash: 'RANDOM_FI_SOURCE_HASH',
+    behaviour: 'chaotic',
+  },
+  ABCDE1234C: {
+    full_name: 'CCCCCC',
+    first_name: 'CCCCCC',
+    last_name: '',
+    category: 'Individual or Person',
+    creditScore: 420,
+    isFirstTimeBorrower: false,
+    monthlyIncome: 90000,
+    monthlyExpense: 120000,
+    sourceHash: 'UNSEASONED_SOURCE_HASH',
+    behaviour: 'defaulter',
+  },
+};
 
 /**
  * KYC PAN Verification Backend Route
@@ -13,20 +53,40 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'PAN is required' }, { status: 400 });
     }
 
-    const isMockMode = process.env.MOCK_SETU === 'true';
+    const isMockMode = process.env.MOCK_SETU === 'true' || !process.env.SETU_KYC_CLIENT_ID;
 
     if (isMockMode) {
+      const profile = PAN_PROFILES[pan as keyof typeof PAN_PROFILES];
+      if (!profile) {
+        return NextResponse.json({ error: 'PAN is invalid for simulated sandbox verification' }, { status: 400 });
+      }
+
+      const transactions = buildPanProfileTransactions(pan);
+      const baseRisk = evaluateBorrowerRisk({
+        creditScore: profile.creditScore,
+        monthlyIncome: profile.monthlyIncome,
+        monthlyExpense: profile.monthlyExpense,
+        isFirstTimeBorrower: profile.isFirstTimeBorrower,
+        transactions,
+      });
+      const thermoMetrics = calculateThermodynamicRiskMetrics(transactions);
+      const adjustedSRI = calculateAdjustedSRI(baseRisk.sri, thermoMetrics);
+
       console.log(`🚀 [Setu Mock Mode] Verifying Mock PAN: ${pan}`);
+      console.log(`[Risk Simulation] PAN ${pan} | ${profile.full_name} | Behaviour: ${profile.behaviour}`);
+      console.log(`[Risk Simulation] Layer 1-3 SRI ${baseRisk.sri} | Layer 4 entropyDelta ${thermoMetrics.entropyDelta} | wasteHeatRatio ${thermoMetrics.wasteHeatRatio}`);
+      console.log(`[Risk Simulation] Adjusted SRI ${adjustedSRI} | Eligibility ${adjustedSRI >= 65 ? 'BLOCK_AUCTION' : adjustedSRI <= 35 ? 'ALLOW_AUCTION' : 'REVIEW'}`);
+
       return NextResponse.json({
         verification: "SUCCESS",
         id: `mock_txn_${Date.now()}`,
         message: "PAN is valid (Simulated Onboarding).",
         data: {
-          full_name: "Yogesha M J",
-          first_name: "Yogesha",
-          middle_name: "M",
-          last_name: "J",
-          category: "Individual or Person",
+          full_name: profile.full_name,
+          first_name: profile.first_name,
+          middle_name: "",
+          last_name: profile.last_name,
+          category: profile.category,
           aadhaar_seeding_status: "LINKED"
         },
         traceId: `mock-trace-${Date.now()}`

@@ -20,7 +20,7 @@ export const BorrowerForm = ({ onSubmit, isLoading = false }: BorrowerFormProps)
   const [formData, setFormData] = useState<Partial<BorrowerProfile>>({
     fullName: '',
     creditScore: 700,
-    requiredAmount: 500000,
+    requiredAmount: undefined,
     tenureMonths: 60,
   });
 
@@ -42,8 +42,8 @@ export const BorrowerForm = ({ onSubmit, isLoading = false }: BorrowerFormProps)
     }
 
     if (formData.requiredAmount && formData.requiredAmount > 50000000) {
-  newErrors.requiredAmount = 'Loan amount cannot exceed ₹5 Crore';
-}
+      newErrors.requiredAmount = 'Loan amount cannot exceed ₹5 Crore';
+    }
 
     if (!formData.tenureMonths) {
       newErrors.tenureMonths = 'Please select a tenure';
@@ -59,7 +59,9 @@ export const BorrowerForm = ({ onSubmit, isLoading = false }: BorrowerFormProps)
 
     setFormData((prev) => ({
       ...prev,
-      [name]: numericFields.includes(name) ? Number(value) : value,
+      [name]: numericFields.includes(name)
+        ? (value === '' ? undefined : Number(value))
+        : value,
     }));
 
     // Clear error for this field
@@ -159,17 +161,18 @@ export const BorrowerForm = ({ onSubmit, isLoading = false }: BorrowerFormProps)
             id="requiredAmount"
             type="number"
             name="requiredAmount"
-            value={formData.requiredAmount}
+            value={formData.requiredAmount ?? ''}
             onChange={handleChange}
             disabled={isLoading}
             min="100000"
+            placeholder="Enter amount"
             className={`w-full pl-8 pr-4 py-3 rounded-lg bg-slate-800 border text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-primary-500 transition-all ${
               errors.requiredAmount ? 'border-red-500' : 'border-slate-700'
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           />
         </div>
         <div className="text-xs text-slate-400 mt-1">
-          {formData.requiredAmount && `₹${(formData.requiredAmount / 100000).toFixed(1)} Lacs`}
+          {typeof formData.requiredAmount === 'number' && formData.requiredAmount > 0 && `₹${(formData.requiredAmount / 100000).toFixed(1)} Lacs`}
         </div>
         {errors.requiredAmount && (
           <p className="text-red-400 text-sm mt-1">{errors.requiredAmount}</p>

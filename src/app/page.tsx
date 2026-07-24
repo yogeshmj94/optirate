@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { buildMockCashflowHistory, evaluateBorrowerRisk } from '@/services/riskEngine';
 
 // Unified interfaces for our compliant LSP workflow
 interface KYCData {
@@ -51,9 +52,10 @@ export default function Home() {
   const [webviewOtp, setWebviewOtp] = useState<string>('123456');
   const [selectedFip, setSelectedFip] = useState<string>('Setu Mock Bank');
   const [linkedBank, setLinkedBank] = useState<BankAccount | null>(null);
+  const [consentId, setConsentId] = useState<string | null>(null);
 
   // Step 3 States (Reverse Auction Broadcast)
-  const [requiredAmount, setRequiredAmount] = useState<number>(500000);
+  const [requiredAmountInput, setRequiredAmountInput] = useState<string>('');
   const [tenureMonths, setTenureMonths] = useState<number>(36);
   const [creditScore, setCreditScore] = useState<number>(740);
   const [auctionState, setAuctionState] = useState<'idle' | 'broadcasting' | 'completed'>('idle');
@@ -67,11 +69,27 @@ export default function Home() {
   const [esignOtp, setEsignOtp] = useState<string>('123456');
   const [disbursedTxId, setDisbursedTxId] = useState<string | null>(null);
 
+  const requiredAmount = Number(requiredAmountInput || 0);
+
+  const riskSummary = useMemo(() => {
+    const income = linkedBank?.monthlyIncome ?? 120000;
+    const expense = linkedBank?.monthlyExpense ?? 40000;
+
+    const transactions = buildMockCashflowHistory(mobileNumber === '9999999999' ? 'TATA_EMPLOYER_CORP_HASH' : 'BUSINESS_INFLOW_HASH');
+    return evaluateBorrowerRisk({
+      creditScore,
+      monthlyIncome: income,
+      monthlyExpense: expense,
+      isFirstTimeBorrower: creditScore < 700,
+      transactions,
+    });
+  }, [creditScore, linkedBank, mobileNumber]);
+
   // Reverse Auction step description logs
   const BROADCAST_LOGS = [
     'Establishing secure LSP connection to regulatory routing gateway...',
-    'Analyzing parsed Account Aggregator bank statement cashflows...',
-    'Broadcasting anonymized risk profile (DTI: 33%, score: ' + creditScore + ') to 10 partner banks...',
+    `Layered underwriting: SRI ${riskSummary.sri}, monthly surplus ${riskSummary.netCashFlow}, drainage flags ${riskSummary.rapidDrainFlags}.`,
+    `Broadcasting simulated Setu sandbox risk profile (effective score: ${riskSummary.effectiveCreditScore}, risk band: ${riskSummary.riskBand}) to 10 partner banks...`,
     'Aggregating live, competitive rate bids from lending queues...'
   ];
 
@@ -103,37 +121,94 @@ export default function Home() {
     }
   };
 
-  const handleInitiateAAConsent = () => {
+  const handleInitiateAAConsent = async () => {
     if (!mobileNumber || mobileNumber.length < 10) {
       setErrorMessage("Please provide a valid 10-digit mobile number.");
       return;
     }
     setErrorMessage(null);
-    setShowAAWebview(true);
-    setWebviewStep('otp');
+
+    try {
+      const response = await fetch('/api/setu/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'INITIATE', mobileNumber })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to initiate Setu consent');
+
+      setConsentId(data.consentId || null);
+      setShowAAWebview(true);
+      setWebviewStep('otp');
+    } catch (err: any) {
+      setErrorMessage(err.message);
+    }
   };
 
-  const handleVerifyWebviewOtp = () => {
+  const handleVerifyWebviewOtp = async () => {
     if (webviewOtp !== '123456') {
       setErrorMessage("Invalid test OTP. Use '123456' for Setu Sandbox Simulation.");
       return;
     }
-    setWebviewStep('accounts');
+
+    try {
+      const response = await fetch('/api/setu/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'CHECK_STATUS', consentId })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Consent status check failed');
+
+      setSelectedFip(data.linkedAccounts?.[0]?.FIP || selectedFip);
+      setWebviewStep('accounts');
+    } catch (err: any) {
+      setErrorMessage(err.message);
+    }
   };
 
-  const handleCompleteConsentWebview = () => {
-    // Generate realistic cash flows based on chosen test accounts
-    const mockStatement: BankAccount = {
-      FIP: selectedFip,
-      accountType: 'SAVINGS',
-      balance: 145000,
-      monthlyIncome: mobileNumber === '9999999999' ? 120000 : 65000,
-      monthlyExpense: mobileNumber === '9999999999' ? 40000 : 25000
-    };
+  const handleCompleteConsentWebview = async () => {
+    try {
+      const sessionResponse = await fetch('/api/setu/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'CREATE_SESSION', consentId })
+      });
+      const sessionData = await sessionResponse.json();
+      if (!sessionResponse.ok) throw new Error(sessionData.error || 'Data session creation failed');
 
-    setLinkedBank(mockStatement);
-    setShowAAWebview(false);
-    setCurrentStep(3); // Progress to Reverse Auction Prep
+      const dataResponse = await fetch('/api/setu/consent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'FETCH_DATA', sessionId: sessionData.sessionId })
+      });
+      const data = await dataResponse.json();
+      if (!dataResponse.ok) throw new Error(data.error || 'Failed to fetch statement data');
+
+      const transactions = data.data?.account?.transactions || [];
+      const income = transactions
+        .filter((tx: any) => tx.type === 'CREDIT')
+        .reduce((sum: number, tx: any) => sum + tx.amount, 0) / Math.max(transactions.filter((tx: any) => tx.type === 'CREDIT').length, 1);
+      const expense = transactions
+        .filter((tx: any) => tx.type === 'DEBIT')
+        .reduce((sum: number, tx: any) => sum + tx.amount, 0) / Math.max(transactions.filter((tx: any) => tx.type === 'DEBIT').length, 1);
+
+      const mockStatement: BankAccount = {
+        FIP: selectedFip,
+        accountType: 'SAVINGS',
+        balance: data.data?.account?.summary?.balance || 145000,
+        monthlyIncome: Math.round(income),
+        monthlyExpense: Math.round(expense)
+      };
+
+      setLinkedBank(mockStatement);
+      setShowAAWebview(false);
+      setCurrentStep(3);
+    } catch (err: any) {
+      setErrorMessage(err.message);
+    }
   };
 
   const triggerReverseAuction = () => {
@@ -157,6 +232,15 @@ export default function Home() {
     const income = linkedBank?.monthlyIncome || 120000;
     const expense = linkedBank?.monthlyExpense || 40000;
 
+    if (riskSummary.eligibility === 'BLOCK_AUCTION') {
+      setBids([]);
+      setAuctionState('completed');
+      setErrorMessage('Borrower is flagged as high-risk: low discipline or unstable inflow detected in the simulated Setu analytics.');
+      return;
+    }
+
+    const riskAdjustedCreditScore = riskSummary.effectiveCreditScore;
+
     // Simulate 3 diverse bank underwriting engines
     const simulatedBids: Bid[] = [
       {
@@ -166,8 +250,8 @@ export default function Home() {
         baseInterestRate: 10.25,
         processingFeePercent: 0.5,
         calculatedAPR: 10.42,
-        monthlyEMI: Math.round(calculateEmi(requiredAmount, 10.25, tenureMonths)),
-        totalPayout: Math.round(calculateEmi(requiredAmount, 10.25, tenureMonths) * tenureMonths + (requiredAmount * 0.005)),
+        monthlyEMI: Math.round(calculateEmi(requiredAmount, 10.25 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths)),
+        totalPayout: Math.round(calculateEmi(requiredAmount, 10.25 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths) * tenureMonths + (requiredAmount * 0.005)),
         rank: 2,
         status: 'Approved'
       },
@@ -178,8 +262,8 @@ export default function Home() {
         baseInterestRate: 9.90,
         processingFeePercent: 0.0,
         calculatedAPR: 9.90,
-        monthlyEMI: Math.round(calculateEmi(requiredAmount, 9.90, tenureMonths)),
-        totalPayout: Math.round(calculateEmi(requiredAmount, 9.90, tenureMonths) * tenureMonths),
+        monthlyEMI: Math.round(calculateEmi(requiredAmount, 9.90 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths)),
+        totalPayout: Math.round(calculateEmi(requiredAmount, 9.90 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths) * tenureMonths),
         rank: 1,
         status: 'Approved'
       },
@@ -190,8 +274,8 @@ export default function Home() {
         baseInterestRate: 10.75,
         processingFeePercent: 0.8,
         calculatedAPR: 11.02,
-        monthlyEMI: Math.round(calculateEmi(requiredAmount, 10.75, tenureMonths)),
-        totalPayout: Math.round(calculateEmi(requiredAmount, 10.75, tenureMonths) * tenureMonths + (requiredAmount * 0.008)),
+        monthlyEMI: Math.round(calculateEmi(requiredAmount, 10.75 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths)),
+        totalPayout: Math.round(calculateEmi(requiredAmount, 10.75 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths) * tenureMonths + (requiredAmount * 0.008)),
         rank: 3,
         status: 'Approved'
       }
@@ -200,7 +284,8 @@ export default function Home() {
     // Filter based on simulated dynamic Debt-To-Income thresholds
     const filteredBids = simulatedBids.map(bid => {
       const dtiRatio = (expense + bid.monthlyEMI) / income;
-      if (dtiRatio > 0.55 || creditScore < 650) {
+      const riskGatePassed = riskSummary.eligibility !== 'BLOCK_AUCTION';
+      if (dtiRatio > 0.55 || riskAdjustedCreditScore < 560 || !riskGatePassed) {
         return { ...bid, status: 'Rejected', rank: 999 };
       }
       return bid;
@@ -268,7 +353,7 @@ export default function Home() {
         </div>
         <div className="flex items-center space-x-3 bg-slate-900/80 px-4 py-2 border border-slate-800 rounded-full">
           <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-          <span className="text-[11px] font-semibold text-slate-300">Setu Sandbox active</span>
+          <span className="text-[11px] font-semibold text-slate-300">Sandbox active</span>
         </div>
       </header>
 
@@ -277,9 +362,9 @@ export default function Home() {
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           {[
             { step: 1, label: 'PAN Verification' },
-            { step: 2, label: 'Setu AA Link' },
+            { step: 2, label: 'Bank Consent' },
             { step: 3, label: 'Reverse Auction' },
-            { step: 4, label: 'Key Fact Sheet (KFS)' },
+            { step: 4, label: 'Agreement Review' },
             { step: 5, label: 'Disbursed' }
           ].map((item) => (
             <div key={item.step} className="flex items-center space-x-2">
@@ -312,7 +397,7 @@ export default function Home() {
         {currentStep === 1 && (
           <div className="bg-slate-950 border border-slate-800 p-8 rounded-2xl shadow-xl max-w-lg mx-auto w-full">
             <h2 className="text-xl font-bold text-slate-100 mb-2">Step 1: Verify Identity</h2>
-            <p className="text-xs text-slate-400 mb-6">Enter your permanent account number to verify your details in real-time via Setu&apos;s KYC engine.</p>
+            <p className="text-xs text-slate-400 mb-6">Enter your permanent account number to verify your details in the secure identity registry.</p>
             
             <form onSubmit={handleVerifyPAN} className="space-y-5">
               <div>
@@ -336,7 +421,7 @@ export default function Home() {
                   className="mt-1 accent-indigo-500"
                 />
                 <label htmlFor="consent" className="text-xs text-slate-400 leading-relaxed">
-                  I hereby authorize OptiRate to pull my name and address details from Setu&apos;s verified KYC registry to create an LSP profile.
+                  I hereby authorize OptiRate to verify my profile in the secure onboarding registry.
                 </label>
               </div>
 
@@ -366,7 +451,7 @@ export default function Home() {
             <div className="border border-slate-850 rounded-2xl bg-slate-900/30 p-6 text-left space-y-4 mb-6">
               <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400">Step 2: Link Statement via Account Aggregator</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                OptiRate runs deep bank analytics to calculate your secure debt obligations. Link your active bank statements securely using Setu&apos;s Account Aggregator gateway.
+                OptiRate runs backend-only bank analytics to evaluate your transaction history and underwriting readiness.
               </p>
               <div>
                 <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Registered Phone Number</label>
@@ -384,7 +469,7 @@ export default function Home() {
               onClick={handleInitiateAAConsent}
               className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg transition-colors"
             >
-              Connect bank statement securely &rarr;
+              Continue to bank consent &rarr;
             </button>
           </div>
         )}
@@ -403,9 +488,11 @@ export default function Home() {
                 <div>
                   <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Loan Amount (INR)</label>
                   <input 
-                    type="number" 
-                    value={requiredAmount}
-                    onChange={(e) => setRequiredAmount(Number(e.target.value))}
+                    type="number"
+                    inputMode="numeric"
+                    placeholder="Enter amount"
+                    value={requiredAmountInput}
+                    onChange={(e) => setRequiredAmountInput(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-850 text-white rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 font-mono" 
                   />
                 </div>
@@ -426,20 +513,6 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Pre-filled Bank Cashflows (via AA)</label>
-                  <div className="bg-slate-900 border border-slate-850 p-3 rounded-lg space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-slate-500">Monthly Revenue:</span>
-                      <span className="font-mono font-medium text-emerald-400">₹{linkedBank?.monthlyIncome.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-slate-500">Monthly Outflow:</span>
-                      <span className="font-mono font-medium text-rose-400">₹{linkedBank?.monthlyExpense.toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div>
                   <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Credit Score</label>
                   <input 
                     type="range" 
@@ -453,6 +526,25 @@ export default function Home() {
                     <span>300 (Poor)</span>
                     <span className="text-indigo-400 font-bold">{creditScore}</span>
                     <span>900 (Excellent)</span>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900 border border-slate-850 rounded-xl p-3 space-y-2">
+                  <div className="flex justify-between text-[10px] uppercase tracking-wider text-slate-400">
+                    <span>Risk engine</span>
+                    <span className="font-bold text-indigo-300">{riskSummary.riskBand}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">Score</span>
+                    <span className="font-mono text-emerald-400">{riskSummary.riskScore}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">Discipline</span>
+                    <span className="font-mono text-cyan-300">{riskSummary.disciplineScore}%</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-500">Eligibility</span>
+                    <span className="font-mono text-amber-300">{riskSummary.eligibility}</span>
                   </div>
                 </div>
               </div>
@@ -687,7 +779,7 @@ export default function Home() {
           <div className="bg-white text-slate-900 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
             {/* Header */}
             <div className="bg-indigo-650 text-white p-4 flex items-center justify-between">
-              <span className="text-xs uppercase font-extrabold tracking-widest text-indigo-100">Setu AA Gateway</span>
+              <span className="text-xs uppercase font-extrabold tracking-widest text-indigo-100">Secure Bank Consent</span>
               <button onClick={() => setShowAAWebview(false)} className="text-white font-bold">&times;</button>
             </div>
 
@@ -706,7 +798,7 @@ export default function Home() {
                     onChange={(e) => setWebviewOtp(e.target.value)}
                     className="w-full border border-slate-300 rounded-lg p-3 text-center font-mono text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-indigo-500" 
                   />
-                  <span className="text-[10px] text-indigo-600 mt-1 block">Tip: Enter standard sandbox OTP <strong>&apos;123456&apos;</strong></span>
+                  <span className="text-[10px] text-indigo-600 mt-1 block">Tip: Enter the test OTP <strong>&apos;123456&apos;</strong></span>
                 </div>
                 <button 
                   onClick={handleVerifyWebviewOtp}
@@ -720,7 +812,7 @@ export default function Home() {
             {/* Account Selection Phase */}
             {webviewStep === 'accounts' && (
               <div className="p-6 space-y-4">
-                <h3 className="text-md font-bold text-slate-800 font-sans">Discovered Financial Institutions</h3>
+                <h3 className="text-md font-bold text-slate-800 font-sans">Available Bank Profiles</h3>
                 <p className="text-xs text-slate-500">Choose the simulated financial account to link with this loan verification request.</p>
                 
                 <div className="space-y-2">
@@ -744,7 +836,7 @@ export default function Home() {
                 </div>
 
                 <div className="text-[10px] text-slate-400 leading-relaxed border-t pt-3">
-                  By clicking approve, you grant permission to retrieve statement history for the last 6 months. This consent is secure and revokable.
+                  By clicking approve, you grant permission to securely analyze the latest transaction history for underwriting checks.
                 </div>
 
                 <button 
@@ -765,7 +857,7 @@ export default function Home() {
         <div className="fixed inset-0 bg-slate-950/80 backdrop-filter backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white text-slate-900 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
             <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
-              <span className="text-xs uppercase font-extrabold tracking-widest text-slate-300">Setu Aadhaar eSign</span>
+              <span className="text-xs uppercase font-extrabold tracking-widest text-slate-300">Secure Digital Signature</span>
               <button onClick={() => setShowESignModal(false)} className="text-white font-bold">&times;</button>
             </div>
 

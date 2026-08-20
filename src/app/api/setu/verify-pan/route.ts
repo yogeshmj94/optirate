@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { buildPanProfileTransactions, calculateAdjustedSRI, calculateThermodynamicRiskMetrics, evaluateBorrowerRisk } from '@/services/riskEngine';
+import { buildPanProfileTransactions, evaluateBorrower } from '@/services/riskEngine';
 
 const PAN_PROFILES: Record<string, { full_name: string; first_name: string; last_name: string; category: string; creditScore: number; isFirstTimeBorrower: boolean; monthlyIncome: number; monthlyExpense: number; sourceHash: string; behaviour: 'disciplined' | 'chaotic' | 'defaulter'; }> = {
   ABCDE1234A: {
@@ -62,20 +62,11 @@ export async function POST(request: Request) {
       }
 
       const transactions = buildPanProfileTransactions(pan);
-      const baseRisk = evaluateBorrowerRisk({
-        creditScore: profile.creditScore,
-        monthlyIncome: profile.monthlyIncome,
-        monthlyExpense: profile.monthlyExpense,
-        isFirstTimeBorrower: profile.isFirstTimeBorrower,
-        transactions,
-      });
-      const thermoMetrics = calculateThermodynamicRiskMetrics(transactions);
-      const adjustedSRI = calculateAdjustedSRI(baseRisk.sri, thermoMetrics);
+      const risk = evaluateBorrower(transactions);
 
       console.log(`🚀 [Setu Mock Mode] Verifying Mock PAN: ${pan}`);
       console.log(`[Risk Simulation] PAN ${pan} | ${profile.full_name} | Behaviour: ${profile.behaviour}`);
-      console.log(`[Risk Simulation] Layer 1-3 SRI ${baseRisk.sri} | Layer 4 entropyDelta ${thermoMetrics.entropyDelta} | wasteHeatRatio ${thermoMetrics.wasteHeatRatio}`);
-      console.log(`[Risk Simulation] Adjusted SRI ${adjustedSRI} | Eligibility ${adjustedSRI >= 65 ? 'BLOCK_AUCTION' : adjustedSRI <= 35 ? 'ALLOW_AUCTION' : 'REVIEW'}`);
+      console.log(`[Risk Simulation] SRI ${risk.score} | Action ${risk.action}`);
 
       return NextResponse.json({
         verification: "SUCCESS",
@@ -87,7 +78,12 @@ export async function POST(request: Request) {
           middle_name: "",
           last_name: profile.last_name,
           category: profile.category,
-          aadhaar_seeding_status: "LINKED"
+          aadhaar_seeding_status: "LINKED",
+          riskProfile: {
+            behaviour: profile.behaviour,
+            score: risk.score,
+            action: risk.action,
+          },
         },
         traceId: `mock-trace-${Date.now()}`
       });

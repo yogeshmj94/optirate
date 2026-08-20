@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { SetuAAService } from '@/services/setuAAService';
-import { calculateAdjustedSRI, calculateThermodynamicRiskMetrics, evaluateBorrowerRisk, type CashflowTransaction } from '@/services/riskEngine';
+import { evaluateBorrower, type Transaction } from '@/services/riskEngine';
 
 /**
  * Orchestrator API for Setu AA Consent Flows
@@ -79,31 +79,18 @@ export async function POST(request: Request) {
 
         if (isMockMode) {
           const now = new Date();
-          const accountTransactions: CashflowTransaction[] = [
-            { date: new Date(now.getFullYear(), now.getMonth() - 11, 1).toISOString(), amount: 120000, direction: 'INFLOW', narration: 'salary credit', category: 'SALARY', counterpartyEntityHash: 'TATA_EMPLOYER_CORP_HASH' },
-            { date: new Date(now.getFullYear(), now.getMonth() - 10, 1).toISOString(), amount: 120000, direction: 'INFLOW', narration: 'salary credit', category: 'SALARY', counterpartyEntityHash: 'TATA_EMPLOYER_CORP_HASH' },
-            { date: new Date(now.getFullYear(), now.getMonth() - 9, 1).toISOString(), amount: 120000, direction: 'INFLOW', narration: 'salary credit', category: 'SALARY', counterpartyEntityHash: 'TATA_EMPLOYER_CORP_HASH' },
-            { date: new Date(now.getFullYear(), now.getMonth() - 8, 1).toISOString(), amount: 120000, direction: 'INFLOW', narration: 'salary credit', category: 'SALARY', counterpartyEntityHash: 'TATA_EMPLOYER_CORP_HASH' },
-            { date: new Date(now.getFullYear(), now.getMonth() - 7, 1).toISOString(), amount: 120000, direction: 'INFLOW', narration: 'salary credit', category: 'SALARY', counterpartyEntityHash: 'TATA_EMPLOYER_CORP_HASH' },
-            { date: new Date(now.getFullYear(), now.getMonth() - 6, 1).toISOString(), amount: 120000, direction: 'INFLOW', narration: 'salary credit', category: 'SALARY', counterpartyEntityHash: 'TATA_EMPLOYER_CORP_HASH' },
-            { date: new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString(), amount: 45000, direction: 'OUTFLOW', narration: 'rent utility emi', category: 'RENT', counterpartyEntityHash: 'UTILITY_BILLER_HASH' },
-            { date: new Date(now.getFullYear(), now.getMonth() - 4, 1).toISOString(), amount: 250000, direction: 'INFLOW', narration: 'fixed deposit maturity', category: 'FIXED_DEPOSIT', counterpartyEntityHash: 'FIXED_DEPOSIT_MATURITY_HASH' },
-            { date: new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString(), amount: 20000, direction: 'OUTFLOW', narration: 'credit card bill', category: 'CREDIT_CARD', counterpartyEntityHash: 'CREDIT_CARD_HASH' },
-            { date: new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString(), amount: 12000, direction: 'OUTFLOW', narration: 'internet emi', category: 'UTILITY', counterpartyEntityHash: 'UTILITY_BILLER_HASH' },
-          ];
-
-          const baseRisk = evaluateBorrowerRisk({
-            creditScore: 660,
-            monthlyIncome: 120000,
-            monthlyExpense: 42000,
-            isFirstTimeBorrower: true,
-            transactions: accountTransactions,
-          });
-          const thermoMetrics = calculateThermodynamicRiskMetrics(accountTransactions);
-          const adjustedSRI = calculateAdjustedSRI(baseRisk.sri, thermoMetrics);
+          const accountTransactions: Transaction[] = Array.from({ length: 6 }, (_, index) => ({
+            id: `salary-${index}`,
+            timestamp: new Date(now.getFullYear(), now.getMonth() - index, 1).toISOString(),
+            grossAmount: 120000,
+            direction: 'INFLOW' as const,
+            category: 'SALARY',
+            counterpartyEntityHash: 'TATA_EMPLOYER_CORP_HASH',
+          }));
+          const risk = evaluateBorrower(accountTransactions);
 
           console.log(`🚀 [Setu Mock Mode] Fetching Mock Decrypted Bank Statement Data`);
-          console.log(`[Risk Simulation] AA consent metrics | SRI ${baseRisk.sri} | Adjusted SRI ${adjustedSRI} | entropyDelta ${thermoMetrics.entropyDelta} | wasteHeatRatio ${thermoMetrics.wasteHeatRatio}`);
+          console.log(`[Risk Simulation] AA consent metrics | SRI ${risk.score} | Action ${risk.action}`);
           return NextResponse.json({
             success: true,
             data: {

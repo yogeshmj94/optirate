@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Borrower {
+  id                String   @id @default(uuid())
+  aaConsentId       String
+  createdAt         DateTime @default(now())
+  applications      LoanApplication[]
+}
+
+model LoanApplication {
+  id                      String   @id @default(uuid())
+  borrowerId              String
+  borrower                Borrower @relation(fields: [borrowerId], references: [id])
+  status                  ApplicationStatus @default(SUBMITTED)
+  requestedAmount         Decimal
+  requestedTenureMonths   Int
+  submittedAt             DateTime @default(now())
+  transactionWindowStart  DateTime
+  transactionWindowEnd    DateTime
+
+  riskDecision            RiskDecisionAuditRecord?
+  bids                    AuctionBid[]
+  auctionResult           AuctionResult?
+  ledgerEntries           PlatformLedgerEntry[]
+  outcomeSyncs            LoanOutcomeSync[]
+}
+
+enum ApplicationStatus {
+  SUBMITTED
+  RISK_EVALUATED
+  AUCTION_OPEN
+  AUCTION_CLOSED
+  FUNDED
+  REJECTED
+  WITHDRAWN
+}
+
+model RiskDecisionAuditRecord {
+  id                String   @id @default(uuid())
+  loanApplicationId String   @unique
+  loanApplication   LoanApplication @relation(fields: [loanApplicationId], references: [id])
+  rulesVersion      String
+  sriScore          Int
+  sriAction         String
+  evaluatedAt       DateTime @default(now())
+  flagDetails       Json
+}
+
+model AuctionBid {
+  id                  String   @id @default(uuid())
+  loanApplicationId   String
+  loanApplication     LoanApplication @relation(fields: [loanApplicationId], references: [id])
+  lenderId            String
+  interestRateOffered Decimal
+  bidReasoning        Json
+  bidStatus           BidStatus @default(ACTIVE)
+  submittedAt         DateTime @default(now())
+
+  @@index([loanApplicationId])
+}
+
+enum BidStatus {
+  ACTIVE
+  WITHDRAWN
+  WON
+  LOST
+}
+
+model AuctionResult {
+  id                 String   @id @default(uuid())
+  loanApplicationId  String   @unique
+  loanApplication    LoanApplication @relation(fields: [loanApplicationId], references: [id])
+  winningBidId       String
+  finalRate          Decimal
+  decidedAt          DateTime @default(now())
+  selectionReasoning String
+}
+
+model PlatformLedgerEntry {
+  id                String   @id @default(uuid())
+  loanApplicationId String
+  loanApplication   LoanApplication @relation(fields: [loanApplicationId], references: [id])
+  entryType         String
+  amount            Decimal
+  direction         String
+  postedAt          DateTime @default(now())
+}
+
+model LoanOutcomeSync {
+  id                String   @id @default(uuid())
+  loanApplicationId String
+  loanApplication   LoanApplication @relation(fields: [loanApplicationId], references: [id])
+  syncedStatus      String
+  asOfDate          DateTime
+  sourceSystem      String
+  ingestedAt        DateTime @default(now())
+}

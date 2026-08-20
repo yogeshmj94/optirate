@@ -1,34 +1,19 @@
 services:
-  fineract-db:
-    image: mariadb:10.11
+  postgres:
+    image: postgres:16-alpine
     ports:
-      - "3306:3306"
+      - "5432:5432"
     environment:
-      - MARIADB_ROOT_PASSWORD=mysql
-      - MARIADB_DATABASE=fineract_tenants
+      POSTGRES_DB: optirate
+      POSTGRES_USER: optirate
+      POSTGRES_PASSWORD: optirate
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U optirate -d optirate"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     volumes:
-      - fineract-db-data:/var/lib/mysql
-
-  fineract-server:
-    image: apache/fineract:1.10.1
-    depends_on:
-      - fineract-db
-    ports:
-      - "8443:8443"
-    environment:
-      - TZ=Asia/Kolkata
-      
-      # --- NEW MODERN TENANTS DATABASE CONFIG ---
-      - FINERACT_HIKARI_DRIVER_SOURCE_CLASS_NAME=org.mariadb.jdbc.Driver
-      - FINERACT_HIKARI_JDBC_URL=jdbc:mariadb://fineract-db:3306/fineract_tenants
-      - FINERACT_HIKARI_USERNAME=root
-      - FINERACT_HIKARI_PASSWORD=mysql
-
-      # --- DEFAULT TENANT (YOUR DATA) DATABASE ---
-      - FINERACT_DEFAULT_TENANTDB_HOSTNAME=fineract-db
-      - FINERACT_DEFAULT_TENANTDB_PORT=3306
-      - FINERACT_DEFAULT_TENANTDB_UID=root
-      - FINERACT_DEFAULT_TENANTDB_PWD=mysql
+      - postgres-data:/var/lib/postgresql/data
 
 volumes:
-  fineract-db-data:
+  postgres-data:

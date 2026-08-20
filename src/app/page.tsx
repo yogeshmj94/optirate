@@ -695,6 +695,21 @@ export default function Home() {
                     </div>
                   </div>
                 )}
+
+                {auctionState === 'completed' && bids.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-24 text-center">
+                    <p className="font-medium text-amber-300 text-sm">Auction blocked by underwriting</p>
+                    <p className="text-xs text-slate-500 mt-2 max-w-md">
+                      This decision was recorded for audit. No lender bids or disbursement records were created.
+                    </p>
+                    <button
+                      onClick={resetLoanApplication}
+                      className="mt-6 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-colors"
+                    >
+                      Start new loan application
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

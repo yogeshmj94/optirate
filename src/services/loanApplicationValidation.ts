@@ -3,6 +3,9 @@ export interface LoanApplicationSubmission {
   tenureMonths: number;
   lenderId: string;
   interestRate: number;
+  riskScore?: number;
+  riskAction?: 'ALLOW_AUCTION' | 'REVIEW' | 'BLOCK_AUCTION';
+  riskReasons?: string[];
   borrowerId?: string;
   aaConsentId?: string;
 }
@@ -17,6 +20,9 @@ export function isLoanApplicationSubmission(value: unknown): value is LoanApplic
     Number.isInteger(body.tenureMonths) &&
     body.tenureMonths > 0 &&
     typeof body.lenderId === 'string' &&
-    typeof body.interestRate === 'number'
+    typeof body.interestRate === 'number' &&
+    (body.riskScore === undefined || (typeof body.riskScore === 'number' && body.riskScore >= 0 && body.riskScore <= 100)) &&
+    (body.riskAction === undefined || ['ALLOW_AUCTION', 'REVIEW', 'BLOCK_AUCTION'].includes(body.riskAction as string)) &&
+    (body.riskReasons === undefined || (Array.isArray(body.riskReasons) && body.riskReasons.every((reason) => typeof reason === 'string')))
   );
 }

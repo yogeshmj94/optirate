@@ -326,7 +326,10 @@ export default function Home() {
           amount: requiredAmount,
           tenureMonths,
           borrowerName: kycResult?.data.full_name || "Yogesha M J",
-          interestRate: selectedBid?.calculatedAPR || 0
+          interestRate: selectedBid?.calculatedAPR || 0,
+          riskScore: riskSummary.score,
+          riskAction: riskSummary.action,
+          riskReasons: riskSummary.reasons
         })
       });
 

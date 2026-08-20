@@ -3,7 +3,11 @@ import { createAuctionBid } from '@/services/auctionBidRepository';
 import { createAuctionResult } from '@/services/auctionResultRepository';
 import { createBorrower } from '@/services/borrowerRepository';
 import { createLoanApplication } from '@/services/loanApplicationRepository';
+import { createLoanOutcomeSync } from '@/services/loanOutcomeSyncRepository';
+import { createPlatformLedgerEntry } from '@/services/platformLedgerRepository';
+import { createRiskDecision } from '@/services/riskDecisionRepository';
 import { isLoanApplicationSubmission } from '@/services/loanApplicationValidation';
+import { RULES_VERSION } from '@/services/riskEngine';
 
 export async function POST(request: Request) {
   try {
@@ -34,6 +38,25 @@ export async function POST(request: Request) {
       winningBidId: bid.id,
       finalRate: body.interestRate,
       selectionReasoning: 'Borrower selected the winning marketplace bid.',
+    });
+    await createRiskDecision({
+      loanApplicationId: application.id,
+      rulesVersion: RULES_VERSION,
+      sriScore: body.riskScore ?? 0,
+      sriAction: body.riskAction ?? 'ALLOW_AUCTION',
+      flagDetails: body.riskReasons ?? [],
+    });
+    await createPlatformLedgerEntry({
+      loanApplicationId: application.id,
+      entryType: 'DISBURSEMENT',
+      amount: body.amount,
+      direction: 'CREDIT',
+    });
+    await createLoanOutcomeSync({
+      loanApplicationId: application.id,
+      syncedStatus: 'DISBURSED',
+      asOfDate: now,
+      sourceSystem: 'marketplace-completion',
     });
 
     return NextResponse.json({

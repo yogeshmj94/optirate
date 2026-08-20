@@ -12,20 +12,26 @@ import { isLoanApplicationSubmission } from '../src/services/loanApplicationVali
 const databaseAvailable = Boolean(process.env.DATABASE_URL);
 const integrationTest = databaseAvailable ? test : test.skip;
 
-async function cleanup(): Promise<void> {
-  await prisma.auctionResult.deleteMany();
-  await prisma.loanOutcomeSync.deleteMany();
-  await prisma.platformLedgerEntry.deleteMany();
-  await prisma.auctionBid.deleteMany();
-  await prisma.riskDecisionAuditRecord.deleteMany();
-  await prisma.loanApplication.deleteMany();
-  await prisma.borrower.deleteMany();
+async function cleanup(applicationId: string | undefined, borrowerId: string | undefined): Promise<void> {
+  if (applicationId) {
+    await prisma.auctionResult.deleteMany({ where: { loanApplicationId: applicationId } });
+    await prisma.loanOutcomeSync.deleteMany({ where: { loanApplicationId: applicationId } });
+    await prisma.platformLedgerEntry.deleteMany({ where: { loanApplicationId: applicationId } });
+    await prisma.auctionBid.deleteMany({ where: { loanApplicationId: applicationId } });
+    await prisma.riskDecisionAuditRecord.deleteMany({ where: { loanApplicationId: applicationId } });
+    await prisma.loanApplication.delete({ where: { id: applicationId } });
+  }
+  if (borrowerId) {
+    await prisma.borrower.delete({ where: { id: borrowerId } });
+  }
 }
 
 integrationTest('loan application relations and append-only happy path work', async () => {
-  await cleanup();
+  let applicationId: string | undefined;
+  let borrowerId: string | undefined;
   try {
     const borrower = await createBorrower('integration-aa-consent');
+    borrowerId = borrower.id;
     const application = await createLoanApplication({
       borrowerId: borrower.id,
       requestedAmount: 250000,
@@ -33,6 +39,7 @@ integrationTest('loan application relations and append-only happy path work', as
       transactionWindowStart: new Date('2026-05-01T00:00:00.000Z'),
       transactionWindowEnd: new Date('2026-07-30T23:59:59.999Z'),
     });
+    applicationId = application.id;
     const decision = await createRiskDecision({
       loanApplicationId: application.id,
       rulesVersion: '2026.08.1',
@@ -79,7 +86,7 @@ integrationTest('loan application relations and append-only happy path work', as
     assert.equal(loaded?.auctionResult?.id, result.id);
     assert.equal(loaded?.outcomeSyncs.length, 1);
   } finally {
-    await cleanup();
+    await cleanup(applicationId, borrowerId);
   }
 });
 

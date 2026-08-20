@@ -1,7 +1,7 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Suspense, useState } from 'react';
+import { Suspense, useRef, useState } from 'react';
 import { 
   TraditionalBankAgreement, 
   FintechStartupAgreement, 
@@ -14,6 +14,7 @@ function AgreementContent() {
   
   const [isSigning, setIsSigning] = useState(false);
   const [signatureSuccess, setSignatureSuccess] = useState(false);
+  const completionRequestId = useRef<string>(crypto.randomUUID());
 
   // Extract the data passed from the URL
   const lenderId = searchParams.get('lenderId') || 'unknown';
@@ -44,6 +45,7 @@ function AgreementContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          completionRequestId: completionRequestId.current,
           lenderId,
           lenderName,
           amount: principal, 

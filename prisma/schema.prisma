@@ -22,6 +22,7 @@ model LoanApplication {
   status                  ApplicationStatus @default(SUBMITTED)
   requestedAmount         Decimal
   requestedTenureMonths   Int
+  completionRequestId     String?  @unique
   submittedAt             DateTime @default(now())
   transactionWindowStart  DateTime
   transactionWindowEnd    DateTime

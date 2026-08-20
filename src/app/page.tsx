@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { buildMockCashflowHistory, buildPanProfileTransactions, evaluateBorrower } from '@/services/riskEngine';
 
 // Unified interfaces for our compliant LSP workflow
@@ -73,6 +73,7 @@ export default function Home() {
   const [esignAadhaar, setEsignAadhaar] = useState<string>('1234 5678 9012');
   const [esignOtp, setEsignOtp] = useState<string>('123456');
   const [disbursedTxId, setDisbursedTxId] = useState<string | null>(null);
+  const completionRequestId = useRef<string>(crypto.randomUUID());
 
   const requiredAmount = Number(requiredAmountInput || 0);
 
@@ -321,6 +322,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          completionRequestId: completionRequestId.current,
           lenderId: selectedBid?.lenderId,
           lenderName: selectedBid?.lenderName,
           amount: requiredAmount,

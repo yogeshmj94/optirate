@@ -5,6 +5,7 @@ export type LoanApplicationRecord = Prisma.LoanApplicationGetPayload<{}>;
 
 export interface CreateLoanApplicationInput {
   borrowerId: string;
+  completionRequestId?: string;
   requestedAmount: Prisma.Decimal | Prisma.DecimalJsLike | number | string;
   requestedTenureMonths: number;
   transactionWindowStart: Date;
@@ -15,6 +16,7 @@ export interface CreateLoanApplicationInput {
 export function createLoanApplication(input: CreateLoanApplicationInput): Promise<LoanApplicationRecord> {
   return prisma.loanApplication.create({
     data: {
+      completionRequestId: input.completionRequestId,
       requestedAmount: input.requestedAmount,
       requestedTenureMonths: input.requestedTenureMonths,
       transactionWindowStart: input.transactionWindowStart,

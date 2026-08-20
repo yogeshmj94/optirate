@@ -1,4 +1,5 @@
 export interface LoanApplicationSubmission {
+  completionRequestId: string;
   amount: number;
   tenureMonths: number;
   lenderId: string;
@@ -14,6 +15,7 @@ export function isLoanApplicationSubmission(value: unknown): value is LoanApplic
   if (typeof value !== 'object' || value === null) return false;
   const body = value as Record<string, unknown>;
   return (
+    typeof body.completionRequestId === 'string' && body.completionRequestId.length > 0 && body.completionRequestId.length <= 128 &&
     typeof body.amount === 'number' &&
     body.amount > 0 &&
     typeof body.tenureMonths === 'number' &&

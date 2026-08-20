@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { buildMockCashflowHistory, evaluateBorrowerRisk } from '@/services/riskEngine';
+import { buildMockCashflowHistory, buildPanProfileTransactions, evaluateBorrower } from '@/services/riskEngine';
 
 // Unified interfaces for our compliant LSP workflow
 interface KYCData {
@@ -10,6 +10,11 @@ interface KYCData {
     full_name: string;
     category: string;
     aadhaar_seeding_status: string;
+    riskProfile?: {
+      behaviour: 'disciplined' | 'chaotic' | 'defaulter';
+      score: number;
+      action: 'ALLOW_AUCTION' | 'REVIEW' | 'BLOCK_AUCTION';
+    };
   };
 }
 
@@ -41,7 +46,7 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Step 1 States (KYC)
-  const [pan, setPan] = useState<string>('ABCDE1234F');
+  const [pan, setPan] = useState<string>('ABCDE1234A');
   const [kycConsent, setKycConsent] = useState<boolean>(false);
   const [kycResult, setKycResult] = useState<KYCData | null>(null);
 
@@ -72,24 +77,18 @@ export default function Home() {
   const requiredAmount = Number(requiredAmountInput || 0);
 
   const riskSummary = useMemo(() => {
-    const income = linkedBank?.monthlyIncome ?? 120000;
-    const expense = linkedBank?.monthlyExpense ?? 40000;
-
-    const transactions = buildMockCashflowHistory(mobileNumber === '9999999999' ? 'TATA_EMPLOYER_CORP_HASH' : 'BUSINESS_INFLOW_HASH');
-    return evaluateBorrowerRisk({
-      creditScore,
-      monthlyIncome: income,
-      monthlyExpense: expense,
-      isFirstTimeBorrower: creditScore < 700,
-      transactions,
-    });
-  }, [creditScore, linkedBank, mobileNumber]);
+    const profilePans = ['ABCDE1234A', 'ABCDE1234B', 'ABCDE1234C'];
+    const transactions = profilePans.includes(pan)
+      ? buildPanProfileTransactions(pan)
+      : buildMockCashflowHistory(mobileNumber === '9999999999' ? 'TATA_EMPLOYER_CORP_HASH' : 'BUSINESS_INFLOW_HASH');
+    return evaluateBorrower(transactions);
+  }, [mobileNumber, pan]);
 
   // Reverse Auction step description logs
   const BROADCAST_LOGS = [
     'Establishing secure LSP connection to regulatory routing gateway...',
-    `Layered underwriting: SRI ${riskSummary.sri}, monthly surplus ${riskSummary.netCashFlow}, drainage flags ${riskSummary.rapidDrainFlags}.`,
-    `Broadcasting simulated Setu sandbox risk profile (effective score: ${riskSummary.effectiveCreditScore}, risk band: ${riskSummary.riskBand}) to 10 partner banks...`,
+    `Layered underwriting: SRI ${riskSummary.score}, action ${riskSummary.action}.`,
+    `Broadcasting simulated Setu sandbox risk profile to 10 partner banks...`,
     'Aggregating live, competitive rate bids from lending queues...'
   ];
 
@@ -232,60 +231,60 @@ export default function Home() {
     const income = linkedBank?.monthlyIncome || 120000;
     const expense = linkedBank?.monthlyExpense || 40000;
 
-    if (riskSummary.eligibility === 'BLOCK_AUCTION') {
+    if (riskSummary.action === 'BLOCK_AUCTION') {
       setBids([]);
       setAuctionState('completed');
       setErrorMessage('Borrower is flagged as high-risk: low discipline or unstable inflow detected in the simulated Setu analytics.');
       return;
     }
 
-    const riskAdjustedCreditScore = riskSummary.effectiveCreditScore;
+    const riskPremium = (riskSummary.score * 0.04) + Math.max(0, (700 - creditScore) * 0.003);
+    const priceBid = (
+      id: string,
+      lenderId: string,
+      lenderName: string,
+      baseInterestRate: number,
+      processingFeePercent: number,
+      rank: number,
+    ): Bid => {
+      const offeredRate = baseInterestRate + riskPremium;
+      const monthlyEMI = Math.round(calculateEmi(requiredAmount, offeredRate, tenureMonths));
+      const totalPayout = Math.round(
+        (monthlyEMI * tenureMonths) + (requiredAmount * (processingFeePercent / 100)),
+      );
+
+      return {
+        id,
+        lenderId,
+        lenderName,
+        baseInterestRate: offeredRate,
+        processingFeePercent,
+        calculatedAPR: Number((offeredRate + (processingFeePercent / (tenureMonths / 12))).toFixed(2)),
+        monthlyEMI,
+        totalPayout,
+        rank,
+        status: 'Approved',
+      };
+    };
 
     // Simulate 3 diverse bank underwriting engines
     const simulatedBids: Bid[] = [
       {
-        id: 'bid_idfc',
-        lenderId: 'lender_01',
-        lenderName: 'IDFC First Bank',
-        baseInterestRate: 10.25,
-        processingFeePercent: 0.5,
-        calculatedAPR: 10.42,
-        monthlyEMI: Math.round(calculateEmi(requiredAmount, 10.25 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths)),
-        totalPayout: Math.round(calculateEmi(requiredAmount, 10.25 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths) * tenureMonths + (requiredAmount * 0.005)),
-        rank: 2,
-        status: 'Approved'
+        ...priceBid('bid_idfc', 'lender_01', 'IDFC First Bank', 10.25, 0.5, 2),
       },
       {
-        id: 'bid_navi',
-        lenderId: 'lender_02',
-        lenderName: 'Navi Finserv',
-        baseInterestRate: 9.90,
-        processingFeePercent: 0.0,
-        calculatedAPR: 9.90,
-        monthlyEMI: Math.round(calculateEmi(requiredAmount, 9.90 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths)),
-        totalPayout: Math.round(calculateEmi(requiredAmount, 9.90 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths) * tenureMonths),
-        rank: 1,
-        status: 'Approved'
+        ...priceBid('bid_navi', 'lender_02', 'Navi Finserv', 9.90, 0, 1),
       },
       {
-        id: 'bid_kotak',
-        lenderId: 'lender_03',
-        lenderName: 'Kotak Mahindra Bank',
-        baseInterestRate: 10.75,
-        processingFeePercent: 0.8,
-        calculatedAPR: 11.02,
-        monthlyEMI: Math.round(calculateEmi(requiredAmount, 10.75 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths)),
-        totalPayout: Math.round(calculateEmi(requiredAmount, 10.75 + Math.max(0, (700 - riskAdjustedCreditScore) * 0.003), tenureMonths) * tenureMonths + (requiredAmount * 0.008)),
-        rank: 3,
-        status: 'Approved'
+        ...priceBid('bid_kotak', 'lender_03', 'Kotak Mahindra Bank', 10.75, 0.8, 3),
       }
     ];
 
     // Filter based on simulated dynamic Debt-To-Income thresholds
     const filteredBids = simulatedBids.map(bid => {
       const dtiRatio = (expense + bid.monthlyEMI) / income;
-      const riskGatePassed = riskSummary.eligibility !== 'BLOCK_AUCTION';
-      if (dtiRatio > 0.55 || riskAdjustedCreditScore < 560 || !riskGatePassed) {
+      const riskGatePassed = riskSummary.action !== 'BLOCK_AUCTION';
+      if (dtiRatio > 0.55 || creditScore < 560 || !riskGatePassed) {
         return { ...bid, status: 'Rejected', rank: 999 };
       }
       return bid;
@@ -317,23 +316,24 @@ export default function Home() {
   const handleFinalizeAgreement = async () => {
     setLoading(true);
     try {
-      // Complete secure server-side disburse orchestration handshake
-      const response = await fetch('/api/fineract/disburse', {
+      // Record the marketplace outcome; the lender owns disbursement and repayment records.
+      const response = await fetch('/api/loan-applications/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           lenderId: selectedBid?.lenderId,
           lenderName: selectedBid?.lenderName,
           amount: requiredAmount,
-          tenure: tenureMonths,
-          borrowerName: kycResult?.data.full_name || "Yogesha M J"
+          tenureMonths,
+          borrowerName: kycResult?.data.full_name || "Yogesha M J",
+          interestRate: selectedBid?.calculatedAPR || 0
         })
       });
 
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Failed to complete transaction logging.');
 
-      setDisbursedTxId(data.loanId || `TXN_${Date.now()}`);
+      setDisbursedTxId(data.applicationId || `APPLICATION_${Date.now()}`);
       setShowESignModal(false);
       setCurrentStep(5); // Success Milestone
     } catch (err: any) {
@@ -532,19 +532,19 @@ export default function Home() {
                 <div className="bg-slate-900 border border-slate-850 rounded-xl p-3 space-y-2">
                   <div className="flex justify-between text-[10px] uppercase tracking-wider text-slate-400">
                     <span>Risk engine</span>
-                    <span className="font-bold text-indigo-300">{riskSummary.riskBand}</span>
+                    <span className="font-bold text-indigo-300">{riskSummary.action}</span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-500">Score</span>
-                    <span className="font-mono text-emerald-400">{riskSummary.riskScore}</span>
+                    <span className="font-mono text-emerald-400">{riskSummary.score}</span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-500">Discipline</span>
-                    <span className="font-mono text-cyan-300">{riskSummary.disciplineScore}%</span>
+                    <span className="font-mono text-cyan-300">{riskSummary.reasons.length}</span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-slate-500">Eligibility</span>
-                    <span className="font-mono text-amber-300">{riskSummary.eligibility}</span>
+                    <span className="font-mono text-amber-300">{riskSummary.action}</span>
                   </div>
                 </div>
               </div>

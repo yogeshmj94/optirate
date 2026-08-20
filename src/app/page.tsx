@@ -212,6 +212,16 @@ export default function Home() {
   };
 
   const triggerReverseAuction = () => {
+    if (!Number.isFinite(requiredAmount) || requiredAmount <= 0) {
+      setBids([]);
+      setAuctionState('idle');
+      setErrorMessage('Enter a loan amount greater than zero before starting the auction.');
+      return;
+    }
+
+    setErrorMessage(null);
+    setBids([]);
+    setSelectedBid(null);
     setAuctionState('broadcasting');
     setAuctionStepIndex(0);
 
@@ -220,7 +230,7 @@ export default function Home() {
       setAuctionStepIndex((prev) => {
         if (prev >= BROADCAST_LOGS.length - 1) {
           clearInterval(interval);
-          generateCompetitiveBids();
+          void generateCompetitiveBids();
           return prev;
         }
         return prev + 1;
@@ -228,14 +238,34 @@ export default function Home() {
     }, 1000);
   };
 
-  const generateCompetitiveBids = () => {
+  const generateCompetitiveBids = async () => {
     const income = linkedBank?.monthlyIncome || 120000;
     const expense = linkedBank?.monthlyExpense || 40000;
 
     if (riskSummary.action === 'BLOCK_AUCTION') {
       setBids([]);
       setAuctionState('completed');
-      setErrorMessage('Borrower is flagged as high-risk: low discipline or unstable inflow detected in the simulated Setu analytics.');
+      try {
+        const response = await fetch('/api/loan-applications/blocked', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            completionRequestId: completionRequestId.current,
+            amount: requiredAmount,
+            tenureMonths,
+            riskScore: riskSummary.score,
+            riskAction: riskSummary.action,
+            riskReasons: riskSummary.reasons,
+            aaConsentId: consentId || undefined,
+          }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Unable to record blocked auction.');
+        setDisbursedTxId(data.applicationId);
+        setErrorMessage(`Auction blocked and recorded. ${riskSummary.reasons.join(' ')}`);
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : 'Unable to record blocked auction.');
+      }
       return;
     }
 
@@ -307,6 +337,34 @@ export default function Home() {
   const handleSelectBid = (bid: Bid) => {
     setSelectedBid(bid);
     setCurrentStep(4); // Advance to KFS screen
+  };
+
+  const resetLoanApplication = () => {
+    setCurrentStep(1);
+    setLoading(false);
+    setErrorMessage(null);
+    setPan('ABCDE1234A');
+    setKycConsent(false);
+    setKycResult(null);
+    setMobileNumber('9999999999');
+    setShowAAWebview(false);
+    setWebviewStep('otp');
+    setWebviewOtp('123456');
+    setSelectedFip('Setu Mock Bank');
+    setLinkedBank(null);
+    setConsentId(null);
+    setRequiredAmountInput('');
+    setTenureMonths(36);
+    setCreditScore(740);
+    setAuctionState('idle');
+    setAuctionStepIndex(0);
+    setBids([]);
+    setSelectedBid(null);
+    setShowESignModal(false);
+    setEsignAadhaar('1234 5678 9012');
+    setEsignOtp('123456');
+    setDisbursedTxId(null);
+    completionRequestId.current = crypto.randomUUID();
   };
 
   const handleTriggerESign = () => {
@@ -761,11 +819,7 @@ export default function Home() {
             </div>
 
             <button 
-              onClick={() => {
-                setCurrentStep(1);
-                setKycConsent(false);
-                setSelectedBid(null);
-              }}
+              onClick={resetLoanApplication}
               className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-colors"
             >
               Configure new Loan application

@@ -1,0 +1,1 @@
+{"priority":10,"request":{"method":"POST","urlPath":"/banks/nova/preapproved-offers"},"response":{"status":200,"jsonBody":{"decisioning":{"verdict":"INELIGIBLE"}},"headers":{"Content-Type":"application/json"},"fixedDelayMilliseconds":520}}

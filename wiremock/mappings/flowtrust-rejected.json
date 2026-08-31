@@ -1,0 +1,1 @@
+{"priority":10,"request":{"method":"POST","urlPath":"/banks/flowtrust/preapproved-offers"},"response":{"status":200,"jsonBody":{"decision":"REJECTED"},"headers":{"Content-Type":"application/json"},"fixedDelayMilliseconds":410}}

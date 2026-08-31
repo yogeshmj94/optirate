@@ -34,19 +34,41 @@ export async function POST(request: Request) {
           status: 'FUNDED',
         },
       });
-      const bid = await tx.auctionBid.create({
-        data: {
-          loanApplicationId: createdApplication.id,
-          lenderId: body.lenderId,
-          interestRateOffered: body.interestRate,
-          bidReasoning: { source: 'selected-auction-bid', tenureMonths: body.tenureMonths },
-          bidStatus: 'WON',
-        },
-      });
+      const auditBids = body.auctionBids?.length ? body.auctionBids : [{ lenderId: body.lenderId, calculatedAPR: body.interestRate, status: 'Approved' }];
+      let winningBidId = '';
+      for (const decision of auditBids) {
+        const lenderId = String(decision.lenderId);
+        const isWinner = lenderId === body.lenderId && decision.status === 'Approved';
+        const bid = await tx.auctionBid.create({
+          data: {
+            loanApplicationId: createdApplication.id,
+            lenderId,
+            interestRateOffered: Number(decision.calculatedAPR || decision.baseInterestRate || 0),
+            bidReasoning: JSON.parse(JSON.stringify({
+              source: 'auction-decision-audit',
+              lenderName: decision.lenderName,
+              decision: decision.status,
+              remark: decision.decisionReason,
+              requestedTenureMonths: decision.requestedTenureMonths,
+              offeredTenureMonths: decision.offeredTenureMonths,
+              currentDtiPercent: decision.currentDtiPercent,
+              projectedDtiPercent: decision.projectedDtiPercent,
+              maxDtiPercent: decision.maxDtiPercent,
+              monthlyEMI: decision.monthlyEMI,
+              platformFeePercent: decision.platformFeePercent,
+              marketBenchmarkRate: decision.marketBenchmarkRate,
+              marketDiscountPercent: decision.marketDiscountPercent,
+            })) as Prisma.InputJsonValue,
+            bidStatus: isWinner ? 'WON' : 'LOST',
+          },
+        });
+        if (isWinner) winningBidId = bid.id;
+      }
+      if (!winningBidId) throw new Error('Winning lender decision was not included in the auction audit payload.');
       await tx.auctionResult.create({
         data: {
           loanApplicationId: createdApplication.id,
-          winningBidId: bid.id,
+          winningBidId,
           finalRate: body.interestRate,
           selectionReasoning: 'Borrower selected the winning marketplace bid.',
         },
@@ -68,6 +90,16 @@ export async function POST(request: Request) {
           direction: 'CREDIT',
         },
       });
+      if ((body.platformFeePercent || 0) > 0) {
+        await tx.platformLedgerEntry.create({
+          data: {
+            loanApplicationId: createdApplication.id,
+            entryType: 'PLATFORM_FEE',
+            amount: body.amount * (body.platformFeePercent || 0) / 100,
+            direction: 'CREDIT',
+          },
+        });
+      }
       await tx.loanOutcomeSync.create({
         data: {
           loanApplicationId: createdApplication.id,

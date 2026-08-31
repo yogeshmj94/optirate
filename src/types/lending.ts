@@ -28,6 +28,18 @@ export interface LoanBid {
   totalPayout: number; 
   rank: number; // 1 = lowest APR (best)
   status: 'Approved' | 'Rejected';
+  offerId?: string;
+  validUntil?: string;
+  decisionReason?: string;
+  riskTier?: 'LOW' | 'MEDIUM' | 'HIGH';
+  platformFeePercent?: number;
+  marketBenchmarkRate?: number;
+  marketDiscountPercent?: number;
+  requestedTenureMonths?: number;
+  offeredTenureMonths?: number;
+  currentDtiPercent?: number;
+  projectedDtiPercent?: number;
+  maxDtiPercent?: number | null;
 }
 
 export interface AuctionRequest {
@@ -35,6 +47,13 @@ export interface AuctionRequest {
   amount: number;
   tenure: number;
   creditScore: number;
+  fullName: string;
+  monthlyIncome: number;
+  monthlyExpense: number;
+  fixedMonthlyObligations: number;
+  cashflowRiskScore: number;
+  cashflowRiskAction: 'ALLOW_AUCTION' | 'REVIEW' | 'BLOCK_AUCTION';
+  borrowerSegment?: string;
 }
 
 export interface AuctionResponse {

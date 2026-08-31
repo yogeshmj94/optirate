@@ -1,193 +1,109 @@
-import { BankSchemaAdapter, StandardBorrowerProfile } from './bankAdapterService';
-import { LoanBid } from '../types/lending';
+import { calculateTrueAPR } from '../lib/aprCalculator';
+import { BankSchemaAdapter, type StandardBorrowerProfile } from './bankAdapterService';
+import type { LoanBid } from '../types/lending';
 
-// Internal mathematical helper for EMI computations (used as a fallback)
-const calculateEMI = (principal: number, annualRate: number, months: number): number => {
-  if (annualRate === 0) return principal / months;
-  const monthlyRate = annualRate / 12 / 100;
-  return (
-    (principal * monthlyRate * Math.pow(1 + monthlyRate, months)) /
-    (Math.pow(1 + monthlyRate, months) - 1)
-  );
-};
+type BankPolicy = { id: string; name: string; path: string; baseRate: number; feePercent: number; maxDti: number | null; maxTenure: number; riskAppetite: 'CONSERVATIVE' | 'BALANCED' | 'HIGH'; segment?: 'GIG' | 'BUSINESS' | 'GENERAL' };
 
-// Define internal properties for simulated remote fallback rules
-const INTERNAL_BANK_METADATA = [
-  { id: 'lender_01', name: 'IDFC First Bank', baseRate: 10.25, feePercent: 0.5, probability: 0.85 },
-  { id: 'lender_02', name: 'Navi Finserv', baseRate: 9.90, feePercent: 0.0, probability: 0.70 },
-  { id: 'lender_03', name: 'Kotak Mahindra Bank', baseRate: 10.75, feePercent: 0.8, probability: 0.80 }
+const BANKS: BankPolicy[] = [
+  { id: 'lender_01', name: 'Aster National Bank', path: '/banks/aster/preapproved-offers', baseRate: 10.25, feePercent: 0.5, maxDti: null, maxTenure: 60, riskAppetite: 'CONSERVATIVE' },
+  { id: 'lender_02', name: 'Nova Digital Bank', path: '/banks/nova/preapproved-offers', baseRate: 16.25, feePercent: 0.25, maxDti: 0.55, maxTenure: 60, riskAppetite: 'BALANCED', segment: 'GENERAL' },
+  { id: 'lender_03', name: 'Summit Opportunity Bank', path: '/banks/summit/preapproved-offers', baseRate: 16.75, feePercent: 0.5, maxDti: 0.65, maxTenure: 72, riskAppetite: 'HIGH', segment: 'GENERAL' },
+  { id: 'lender_04', name: 'FlowTrust Cashflow Bank', path: '/banks/flowtrust/preapproved-offers', baseRate: 16.0, feePercent: 0.25, maxDti: 0.5, maxTenure: 60, riskAppetite: 'BALANCED', segment: 'GENERAL' },
+  { id: 'lender_05', name: 'FlexWork Bank', path: '/banks/flexwork/preapproved-offers', baseRate: 16.5, feePercent: 0.25, maxDti: 0.6, maxTenure: 60, riskAppetite: 'BALANCED', segment: 'GIG' },
+  { id: 'lender_06', name: 'Udyam Growth Bank', path: '/banks/udyam/preapproved-offers', baseRate: 12.5, feePercent: 0.5, maxDti: 0.55, maxTenure: 72, riskAppetite: 'BALANCED', segment: 'BUSINESS' },
 ];
 
-// -----------------------------------------------------------------------------
-// WIREMOCK API CONFIGURATION
-// Replace the placeholder URLs below with your actual WireMock endpoint links!
-// -----------------------------------------------------------------------------
-const WIREMOCK_ENDPOINTS: Record<string, string> = {
-  'lender_01': 'https://91154.wiremockapi.cloud/api/idfc/underwrite',     // IDFC First Bank WireMock Link
-  'lender_02': 'https://gddm9.wiremockapi.cloud/api/navi/underwrite',     // Navi Finserv WireMock Link
-  'lender_03': 'https://766w3.wiremockapi.cloud/api/kotak/underwrite',   // Kotak Mahindra Bank WireMock Link
+const emi = (principal: number, annualRate: number, months: number): number => {
+  const monthlyRate = annualRate / 1200;
+  if (monthlyRate === 0) return principal / months;
+  return principal * monthlyRate * ((1 + monthlyRate) ** months) / (((1 + monthlyRate) ** months) - 1);
 };
 
-export async function runReverseAuction(
-  principalAmount: number, 
-  tenureMonths: number, 
-  creditScore: number,
-  monthlyIncome: number = 100000,
-  monthlyExpense: number = 30000
-): Promise<LoanBid[]> {
-  
-  // Dynamic network connection handshake emulation
-  await new Promise((resolve) => setTimeout(resolve, 2000));
-
-  // Pack standard user criteria matching standard profiles
-  const platformProfile: StandardBorrowerProfile = {
-    fullName: "Borrower Profile Summary",
-    requiredAmount: principalAmount,
-    tenureMonths: tenureMonths,
-    creditScore: creditScore,
-    monthlyIncome: monthlyIncome,
-    monthlyExpense: monthlyExpense
-  };
-
-  console.log(`\n=================== Reverse-Auction Broadcast Engine ===================`);
-  console.log(`📡 Dispatched Criteria: Amount: ₹${principalAmount.toLocaleString()}, score: ${creditScore}, Income: ₹${monthlyIncome.toLocaleString()}`);
-
-  // Use Promise.all to map the API requests concurrently so we execute fetches in parallel
-  const bids: LoanBid[] = await Promise.all(
-    INTERNAL_BANK_METADATA.map(async (bank) => {
-      
-      // Step 1: Mapping outbound payload to target vendor schema dynamically using your Adapter
-      const customBankPayload = BankSchemaAdapter.toBankRequestPayload(bank.id, {
-        ...platformProfile,
-        fullName: bank.id === 'lender_01' ? 'IDFC CLIENT' : 'Navi Client'
-      });
-
-      console.log(`\n💼 1. Mapped Payload Outbound for: ${bank.name}`);
-      console.log(JSON.stringify(customBankPayload, null, 2));
-
-      let mockBankResponse: any = null;
-      let usedWireMock = false;
-      const wiremockUrl = WIREMOCK_ENDPOINTS[bank.id];
-
-      // Step 2: Dispatch actual WireMock API HTTP call if user configured a valid URL
-      if (wiremockUrl && !wiremockUrl.includes('your-wiremock-id')) {
-        try {
-          console.log(`🚀 Sending POST request to WireMock for ${bank.name}... Url: ${wiremockUrl}`);
-          const response = await fetch(wiremockUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: JSON.stringify(customBankPayload)
-          });
-
-          if (response.ok) {
-            mockBankResponse = await response.json();
-            usedWireMock = true;
-            console.log(`📡 [WireMock SUCCESS] Received custom native response from ${bank.name}:`);
-            console.log(JSON.stringify(mockBankResponse, null, 2));
-          } else {
-            console.warn(`⚠️ WireMock endpoint returned status ${response.status}. Falling back to internal engine.`);
-          }
-        } catch (error) {
-          console.warn(`⚠️ Network connection failed for WireMock: ${bank.name}. Using default fallback simulation.`);
-        }
-      }
-
-      // Fallback: If WireMock is not configured or fails, simulate native responses locally
-      if (!usedWireMock) {
-        let isApproved = Math.random() < bank.probability && creditScore > 650;
-        const riskPremium = creditScore > 750 ? 0 : (750 - creditScore) * 0.025;
-        const finalRate = bank.baseRate + riskPremium;
-
-        const proposedEMI = calculateEMI(principalAmount, finalRate, tenureMonths);
-        const dtiRatio = (monthlyExpense + proposedEMI) / Math.max(1, monthlyIncome);
-
-        // Underwrite restriction: surge failure if debt obligations cross 55%
-        if (dtiRatio > 0.55) {
-          isApproved = false;
-        }
-
-        if (bank.id === 'lender_01') {
-          mockBankResponse = {
-            TX_STATUS: isApproved ? 'APRVD' : 'REJTD',
-            RATE_ANN_PCT: parseFloat(finalRate.toFixed(2)),
-            EMI_EST_MO_VAL: Math.round(proposedEMI),
-            FE_PROC_VAL: Math.round(principalAmount * (bank.feePercent / 100)),
-            OUTFLOW_TOT_VAL: Math.round((proposedEMI * tenureMonths) + (principalAmount * (bank.feePercent / 100)))
-          };
-        } else if (bank.id === 'lender_02') {
-          mockBankResponse = {
-            decisioning: {
-              verdict: isApproved ? 'ELIGIBLE' : 'INELIGIBLE',
-              pricing: isApproved ? {
-                aprPercent: parseFloat(finalRate.toFixed(2)),
-                monthlyPayment: Math.round(proposedEMI),
-                originationCharge: bank.feePercent,
-                aggregateOutflow: Math.round((proposedEMI * tenureMonths))
-              } : undefined
-            }
-          };
-        } else {
-          mockBankResponse = {
-            DEC_CODE: isApproved ? 'A01' : 'R01',
-            INT_R: isApproved ? parseFloat(finalRate.toFixed(2)) : undefined,
-            M_EMI: isApproved ? Math.round(proposedEMI) : undefined,
-            PF_PCT: isApproved ? bank.feePercent : undefined,
-            TOT_PAY: isApproved ? Math.round((proposedEMI * tenureMonths) + (principalAmount * (bank.feePercent / 100))) : undefined
-          };
-        }
-        console.log(`📥 2. [Local Fallback] response built for ${bank.name}:`);
-        console.log(JSON.stringify(mockBankResponse, null, 2));
-      }
-
-      // Step 3: Parse response through Adapter back to standard platform Model
-      const normalizedData = BankSchemaAdapter.toStandardBid(bank.id, mockBankResponse, principalAmount);
-
-      if (normalizedData.status === 'Rejected') {
-        return {
-          id: `bid_${bank.id}_${Date.now()}`,
-          lenderId: bank.id,
-          lenderName: bank.name,
-          baseInterestRate: 0,
-          processingFeePercent: 0,
-          calculatedAPR: 0,
-          monthlyEMI: 0,
-          totalPayout: 0,
-          rank: 999,
-          status: 'Rejected',
-        };
-      }
-
-      const calculatedAPR = normalizedData.interestRate + (normalizedData.feePercent / (tenureMonths / 12));
-
-      return {
-        id: `bid_${bank.id}_${Date.now()}`,
-        lenderId: bank.id,
-        lenderName: bank.name,
-        lenderLogo: `https://placehold.co/120x40/e2e8f0/1e293b?text=${bank.name.replace(/ /g, '+')}`,
-        baseInterestRate: normalizedData.interestRate,
-        processingFeePercent: normalizedData.feePercent,
-        calculatedAPR: parseFloat(calculatedAPR.toFixed(2)),
-        monthlyEMI: normalizedData.emi,
-        totalPayout: normalizedData.totalPayout,
-        rank: 0,
-        status: 'Approved',
-      };
-    })
+const localDecision = (bank: BankPolicy, profile: StandardBorrowerProfile) => {
+  const highAppetite = bank.riskAppetite === 'HIGH';
+  const isGig = profile.borrowerSegment === 'gig_worker_disciplined';
+  const isBusiness = profile.borrowerSegment === 'small_business_disciplined';
+  const segmentMatches = !bank.segment || bank.segment === 'GENERAL' || (bank.segment === 'GIG' && isGig) || (bank.segment === 'BUSINESS' && isBusiness);
+  const bureauPremium = profile.creditScore === 0
+    ? 0
+    : Math.max(0, 720 - profile.creditScore) * (highAppetite ? 0.018 : 0.012);
+  const premium = profile.cashflowRiskScore * (highAppetite ? 0.055 : 0.025) + bureauPremium;
+  const rate = Number((bank.baseRate + premium).toFixed(2));
+  const fixedObligations = profile.fixedMonthlyObligations || 0;
+  const currentDti = fixedObligations / Math.max(profile.monthlyIncome, 1);
+  const candidateTenures = Array.from(new Set([profile.tenureMonths, 12, 18, 24, 36, 48, 60, 72]))
+    .filter((tenure) => tenure >= profile.tenureMonths && tenure <= bank.maxTenure)
+    .sort((a, b) => a - b);
+  const offeredTenure = bank.maxDti === null ? profile.tenureMonths : candidateTenures.find(
+    (tenure) => (fixedObligations + emi(profile.requiredAmount, rate, tenure)) / Math.max(profile.monthlyIncome, 1) <= bank.maxDti!,
   );
+  const projectedDti = offeredTenure ? (fixedObligations + emi(profile.requiredAmount, rate, offeredTenure)) / Math.max(profile.monthlyIncome, 1) : currentDti;
+  const approved = segmentMatches && offeredTenure !== undefined && (highAppetite
+    ? ((profile.creditScore >= 420) || (profile.creditScore === 0 && profile.cashflowRiskScore <= 35))
+    : bank.riskAppetite === 'BALANCED'
+      ? (profile.creditScore >= 610 || profile.creditScore === 0) && profile.cashflowRiskScore <= 35
+      : profile.creditScore >= 720);
+  const reason = bank.riskAppetite === 'CONSERVATIVE'
+    ? 'bureau-only policy'
+    : profile.creditScore === 0
+      ? 'progressive cashflow underwriting for a no-history borrower'
+      : `${bank.riskAppetite.toLowerCase()} cashflow policy`;
+  const tenureRemark = offeredTenure && offeredTenure !== profile.tenureMonths ? `; tenure extended from ${profile.tenureMonths} to ${offeredTenure} months to meet ${(bank.maxDti || 0) * 100}% DTI` : '';
+  return { approved, rate, feePercent: bank.feePercent, offeredTenure: offeredTenure || profile.tenureMonths, currentDti, projectedDti, maxDti: bank.maxDti, reason: approved ? `${reason} matched${tenureRemark}` : `${reason} not met${offeredTenure ? '' : `; no tenure up to ${bank.maxTenure} months meets DTI policy`}` };
+};
 
-  // Step 4: Filtering and ordering by cheapest APR
-  const approvedBids = bids.filter(bid => bid.status === 'Approved');
-  approvedBids.sort((a, b) => a.calculatedAPR - b.calculatedAPR);
+const toNativeFallback = (bank: BankPolicy, decision: ReturnType<typeof localDecision>, profile: StandardBorrowerProfile) => {
+  const monthlyEmi = Math.round(emi(profile.requiredAmount, decision.rate, decision.offeredTenure));
+  const total = Math.round(monthlyEmi * decision.offeredTenure + profile.requiredAmount * decision.feePercent / 100);
+  if (bank.id === 'lender_01') return { TX_STATUS: decision.approved ? 'APRVD' : 'REJTD', RATE_ANN_PCT: decision.rate, EMI_EST_MO_VAL: monthlyEmi, FE_PROC_VAL: profile.requiredAmount * decision.feePercent / 100, OUTFLOW_TOT_VAL: total };
+  if (bank.id === 'lender_02') return { decisioning: { verdict: decision.approved ? 'ELIGIBLE' : 'INELIGIBLE', pricing: decision.approved ? { aprPercent: decision.rate, monthlyPayment: monthlyEmi, originationCharge: decision.feePercent, aggregateOutflow: total } : undefined } };
+  if (bank.id === 'lender_03') return { DEC_CODE: decision.approved ? 'A01' : 'R01', INT_R: decision.rate, M_EMI: monthlyEmi, PF_PCT: decision.feePercent, TOT_PAY: total };
+  return { decision: decision.approved ? 'APPROVED' : 'REJECTED', annualRate: decision.rate, processingFeePercent: decision.feePercent };
+};
 
-  const rankedBids = approvedBids.map((bid, index) => ({
-    ...bid,
-    rank: index + 1
+const bankPayload = (bank: BankPolicy, profile: StandardBorrowerProfile) => bank.id === 'lender_01' || bank.id === 'lender_02' || bank.id === 'lender_03'
+  ? BankSchemaAdapter.toBankRequestPayload(bank.id, profile)
+  : { applicant: { creditScore: profile.creditScore, monthlyIncome: profile.monthlyIncome, monthlyExpense: profile.monthlyExpense, fixedMonthlyObligations: profile.fixedMonthlyObligations || 0, cashflowRiskScore: profile.cashflowRiskScore, segment: profile.borrowerSegment }, loan: { amount: profile.requiredAmount, tenureMonths: profile.tenureMonths } };
+
+const normalize = (bank: BankPolicy, response: any, principal: number) => bank.id === 'lender_01' || bank.id === 'lender_02' || bank.id === 'lender_03'
+  ? BankSchemaAdapter.toStandardBid(bank.id, response, principal)
+  : { status: response.decision === 'APPROVED' ? 'Approved' : 'Rejected', interestRate: response.annualRate || 0, emi: 0, feePercent: response.processingFeePercent || 0, totalPayout: 0 };
+
+export async function runReverseAuction(profile: StandardBorrowerProfile): Promise<LoanBid[]> {
+  const wiremockBaseUrl = process.env.WIREMOCK_BASE_URL || 'http://localhost:8080';
+  const timeoutMs = Number(process.env.BANK_RESPONSE_TIMEOUT_MS || 1800);
+  const bids = await Promise.all(BANKS.map(async (bank): Promise<LoanBid> => {
+    const decision = localDecision(bank, profile);
+    let nativeResponse: unknown;
+    let source = 'WireMock';
+    try {
+      const response = await fetch(`${wiremockBaseUrl}${bank.path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-correlation-id': crypto.randomUUID() }, body: JSON.stringify(bankPayload(bank, profile)), signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      nativeResponse = await response.json();
+    } catch {
+      source = 'deterministic local fallback';
+      nativeResponse = toNativeFallback(bank, decision, profile);
+    }
+    const normalized = normalize(bank, nativeResponse, profile.requiredAmount);
+    const approved = normalized.status === 'Approved' && decision.approved;
+    const platformFeePercent = profile.creditScore === 0 ? 1.5 : 1.0;
+    const monthlyPayment = approved ? Math.round(emi(profile.requiredAmount, normalized.interestRate, decision.offeredTenure)) : 0;
+    const totalPayout = approved ? Math.round(monthlyPayment * decision.offeredTenure + profile.requiredAmount * (normalized.feePercent + platformFeePercent) / 100) : 0;
+    const marketBenchmarkRate = profile.borrowerSegment === 'small_business_disciplined' ? 14 : 18;
+    return {
+      id: `bid_${bank.id}_${crypto.randomUUID()}`, offerId: `offer_${bank.id}_${crypto.randomUUID()}`, lenderId: bank.id, lenderName: bank.name,
+      baseInterestRate: approved ? normalized.interestRate : 0, processingFeePercent: approved ? normalized.feePercent : 0,
+      calculatedAPR: approved ? calculateTrueAPR(normalized.interestRate, normalized.feePercent + platformFeePercent, decision.offeredTenure) : 0,
+      monthlyEMI: monthlyPayment, totalPayout, rank: 999,
+      status: approved ? 'Approved' : 'Rejected', validUntil: new Date(Date.now() + 15 * 60_000).toISOString(),
+      riskTier: profile.cashflowRiskScore >= 65 ? 'HIGH' : profile.cashflowRiskScore >= 36 ? 'MEDIUM' : 'LOW',
+      platformFeePercent, marketBenchmarkRate, marketDiscountPercent: approved ? Number((marketBenchmarkRate - normalized.interestRate).toFixed(2)) : 0,
+      requestedTenureMonths: profile.tenureMonths, offeredTenureMonths: decision.offeredTenure,
+      currentDtiPercent: Number((decision.currentDti * 100).toFixed(2)), projectedDtiPercent: Number((decision.projectedDti * 100).toFixed(2)), maxDtiPercent: decision.maxDti === null ? null : decision.maxDti * 100,
+      decisionReason: `${decision.reason}; response source: ${source}`,
+    };
   }));
-
-  console.log(`\n=================== Auction Translation Run Complete ===================\n`);
-
-  return rankedBids;
+  const approved = bids.filter((bid) => bid.status === 'Approved').sort((a, b) => a.calculatedAPR - b.calculatedAPR);
+  approved.forEach((bid, index) => { bid.rank = index + 1; });
+  return [...approved, ...bids.filter((bid) => bid.status === 'Rejected')];
 }

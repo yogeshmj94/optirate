@@ -8,7 +8,7 @@ OptiRate is a Next.js prototype for a digital lending experience that moves a bo
 - Verifies PAN through a Setu-backed API route.
 - Guides the user through a Setu Account Aggregator consent flow.
 - Runs a backend-only underwriting risk simulation that scores transaction behaviour and eligibility without exposing internal metrics in the UI.
-- Simulates a reverse auction and ranks lender bids by calculated APR.
+- Runs a server-side reverse auction against three WireMock bank APIs and ranks time-limited pre-approved offers by calculated APR.
 - Lets the user select a bid and proceed to a loan agreement experience.
 - Records the selected marketplace application and auction outcome while the lender retains the disbursement and repayment ledger.
 
@@ -43,7 +43,7 @@ The current model has exactly three underwriting layers followed by a Synthetic 
    - Separately measures uncategorized transfers and cash withdrawals as a share of validated income.
    - A deficit with leakage above 15% receives the stronger compounding penalty.
 
-The SRI starts at zero, adds fixed penalties for triggered flags, clamps to 0-100, and maps the result to `ALLOW_AUCTION` (0-35), `REVIEW` (36-64), or `BLOCK_AUCTION` (65-100). Its reasons contain only the plain-language flags that actually triggered.
+The SRI starts at zero, adds fixed penalties for triggered flags, clamps to 0-100, and maps the result to `ALLOW_AUCTION` (0-35), `REVIEW` (36-64), or `BLOCK_AUCTION` (65-100). These values are risk classifications supplied to each lender, not platform-level auction gates. Every valid application is broadcast; each mock bank applies its own appetite and affordability policy.
 
 The engine then returns:
 
@@ -51,13 +51,17 @@ The engine then returns:
 - `action`: `ALLOW_AUCTION`, `REVIEW`, or `BLOCK_AUCTION`
 - `reasons`: explainable reasons for every triggered flag
 
-For the sandbox path, the PAN verification route maps deterministic profile data for:
+The identity and financial simulations are intentionally separate. Use Setu's documented valid sandbox PAN `ABCDE1234A` for every successful identity flow (`ABCDE1234B` is Setu's invalid-PAN test case). After consent, select one of four six-month AA personas:
 
-- `ABCDE1234A` → disciplined first-time borrower
-- `ABCDE1234B` → high-credit-score chaotic cash flow profile
-- `ABCDE1234C` → low-credit-score defaulter profile
+- Prime salaried: high bureau score and clean cashflow.
+- High-score but stressed: strong bureau score sustained through friends/family borrowing and repeated 30%-of-limit petrol-pump cash-like card evergreening.
+- Average salaried: medium bureau score and overextended/average cashflow.
+- Stressed defaulter: low bureau score with chaotic cash sweeps, deficits, and penalties.
+- New-to-credit: no bureau score with clean, seasoned salary cashflow.
+- Disciplined gig worker: no bureau history, variable platform payouts, and positive savings in every month.
+- Disciplined small business: no bureau history, seasonal customer/POS receipts, controlled operating costs, and monthly surplus.
 
-Any other PAN is rejected as invalid for the simulated environment.
+Each statement contains six monthly cycles and canonical credit/debit, balance, narration, counterparty, category, timestamp, and amount fields.
 
 ## Tech stack
 
@@ -147,8 +151,48 @@ The app uses environment variables for real integrations:
 - `SETU_KYC_CLIENT_ID`: Setu client ID.
 - `SETU_KYC_CLIENT_SECRET`: Setu client secret.
 - `SETU_PAN_INSTANCE_ID`: Setu PAN product instance ID.
+- `SETU_ESIGN_CLIENT_ID`, `SETU_ESIGN_CLIENT_SECRET`, `SETU_ESIGN_INSTANCE_ID`: Aadhaar eSign sandbox credentials.
+- `SETU_ESIGN_DOCUMENT_ID`: a PDF document previously uploaded to Setu for signing.
+- `SETU_ESIGN_REDIRECT_URL`: a publicly hosted return URL for Setu's signing flow.
 - `SETU_AA_CLIENT_ID`: Setu Account Aggregator client ID.
 - `SETU_AA_CLIENT_SECRET`: Setu Account Aggregator client secret.
+- `WIREMOCK_BASE_URL`: defaults to `http://localhost:8080`.
+- `BANK_RESPONSE_TIMEOUT_MS`: per-bank response deadline before deterministic fallback.
+
+## WireMock lender auction
+
+Start WireMock and Postgres with `docker compose up -d`. The lender stubs live under `wiremock/mappings`:
+
+- Aster National Bank: conservative bureau-only policy; requires a 720+ score and deliberately ignores cashflow quality.
+- Nova Digital Bank: progressive cashflow underwriting; clean no-history borrowers can receive offers around 16.25%.
+- Summit Opportunity Bank: broader cashflow underwriting; disciplined no-history borrowers can receive a second offer around 16.75%, while riskier profiles are priced separately.
+- FlowTrust Cashflow Bank: general clean-cashflow lender at about 16% for no-history profiles.
+- FlexWork Bank: gig-worker specialist at about 16.5%.
+- Udyam Growth Bank: disciplined small-business specialist at about 12.5%.
+
+### Market benchmark used by the mock auction
+
+The mock pricing is anchored to published lender pricing checked in August 2026. Fibe publishes new-to-credit availability with personal-loan rates starting at 18%; Moneyview publishes self-employed pricing from 14% and overall APRs of 17–45%; Bajaj Finance publishes 14–23% for its self-employed personal-loan product; and KreditBee publishes 12–27.5% for proprietorship borrowers. Because advertised starting rates are not guaranteed offers, OptiRate treats 18% as the demonstration benchmark for general no-history/gig profiles and 14% as the lower-bound benchmark for documented self-employed profiles.
+
+Mock lenders target rates 1–2 percentage points below the applicable benchmark when the six-month cashflow is disciplined. The platform fee is disclosed separately at 1.5% for no-history applicants and 1% for established-credit applicants. True APR includes both lender processing fees and the platform fee.
+
+- https://www.fibe.in/personal-loan/
+- https://moneyview.in/loans/instant-personal-loan-for-self-employed
+- https://www.bajajfinserv.in/personal-loan-for-self-employed
+- https://www.kreditbee.in/personal-loan-for-proprietorship
+
+`POST /api/auction` broadcasts concurrently to all six bank-specific schemas, normalizes their responses, calculates EMI/APR, adds a 15-minute offer validity window, and ranks approvals. If WireMock is unavailable, the same policies run through a deterministic local fallback so the demo remains usable.
+
+The loan form displays AA-derived net monthly income, fixed obligations, current DTI, and an indicative projected DTI that updates with the requested amount and tenure. Each lender then applies its own DTI ceiling and may extend the offered tenure independently of the requested tenure. When an offer is completed, every approval and rejection is stored in `AuctionBid`, including the decision remark, requested/offered tenure, EMI, current/projected DTI, lender threshold, fees, and market-pricing comparison.
+
+## Setu sandbox boundaries
+
+PAN verification uses Setu's `POST /api/verify/pan` contract when KYC credentials are configured. Aadhaar eSign offers two explicit paths:
+
+- Setu Hosted eSign: creates a Setu signature request, opens the hosted Aadhaar/OTP screen in a new tab, and checks Setu's signature status before completion.
+- Simulated Aadhaar OTP: local demonstration fallback using OTP `123456`; it never calls Setu or UIDAI and never asks for or stores an Aadhaar number.
+
+The single valid sandbox PAN is only the identity fixture. Credit and cashflow personas are selected independently after the simulated AA consent, so all four underwriting scenarios can reuse `ABCDE1234A` without pretending that PAN determines financial behavior. `ABCDE1234B` remains available only for testing PAN-verification failure.
 
 If you do not provide these values, the app will still run in its built-in demo mode.
 

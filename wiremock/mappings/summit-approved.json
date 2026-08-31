@@ -1,0 +1,1 @@
+{"priority":1,"request":{"method":"POST","urlPath":"/banks/summit/preapproved-offers","bodyPatterns":[{"matchesJsonPath":"$[?((@.SRI <= 100 && @.CS_VAL >= 420) || (@.SRI <= 35 && @.CS_VAL == 0))]"}]},"response":{"status":200,"jsonBody":{"DEC_CODE":"A01","INT_R":16.75,"M_EMI":0,"PF_PCT":0.5,"TOT_PAY":0},"headers":{"Content-Type":"application/json"},"fixedDelayMilliseconds":940}}

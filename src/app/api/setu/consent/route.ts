@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { SetuAAService } from '@/services/setuAAService';
-import { evaluateBorrower, type Transaction } from '@/services/riskEngine';
+import { evaluateBorrower } from '@/services/riskEngine';
+import { buildSixMonthStatement, getMockAAProfile } from '@/services/mockAAProfiles';
 
 /**
  * Orchestrator API for Setu AA Consent Flows
@@ -9,7 +10,8 @@ import { evaluateBorrower, type Transaction } from '@/services/riskEngine';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { action, mobileNumber, consentId, sessionId } = body;
+    const { action, mobileNumber, consentId, sessionId, profileId } = body;
+    const mockProfile = getMockAAProfile(profileId);
 
     const isMockMode = process.env.MOCK_SETU === 'true' || !process.env.SETU_AA_CLIENT_ID;
 
@@ -26,7 +28,8 @@ export async function POST(request: Request) {
             success: true,
             consentId: `mock_consent_${Date.now()}`,
             url: `https://mock-sandbox.setu.co/v2/decisions/consent?id=mock_consent_${Date.now()}`,
-            status: 'PENDING'
+            status: 'PENDING',
+            profile: mockProfile,
           });
         }
 
@@ -48,7 +51,8 @@ export async function POST(request: Request) {
             success: true,
             consentId: consentId,
             status: 'ACTIVE', // Instantly active in mock mode for fluid testing
-            linkedAccounts: [{ FIP: 'Setu Mock Bank', accountType: 'SAVINGS' }]
+            linkedAccounts: [{ FIP: mockProfile.account.fip, accountType: mockProfile.account.accountType, maskedAccountNumber: mockProfile.account.maskedAccountNumber }],
+            profile: mockProfile,
           });
         }
 
@@ -78,16 +82,11 @@ export async function POST(request: Request) {
         }
 
         if (isMockMode) {
-          const now = new Date();
-          const accountTransactions: Transaction[] = Array.from({ length: 6 }, (_, index) => ({
-            id: `salary-${index}`,
-            timestamp: new Date(now.getFullYear(), now.getMonth() - index, 1).toISOString(),
-            grossAmount: 120000,
-            direction: 'INFLOW' as const,
-            category: 'SALARY',
-            counterpartyEntityHash: 'TATA_EMPLOYER_CORP_HASH',
-          }));
+          const accountTransactions = buildSixMonthStatement(mockProfile.id);
           const risk = evaluateBorrower(accountTransactions);
+          const monthlyIncome = Math.round(accountTransactions.filter((transaction) => transaction.direction === 'INFLOW').reduce((sum, transaction) => sum + transaction.grossAmount, 0) / 6);
+          const monthlyExpense = Math.round(accountTransactions.filter((transaction) => transaction.direction === 'OUTFLOW').reduce((sum, transaction) => sum + transaction.grossAmount, 0) / 6);
+          const fixedMonthlyObligations = Math.round(accountTransactions.filter((transaction) => transaction.direction === 'OUTFLOW' && ['EMI', 'CREDIT_CARD_PAYMENT'].includes(transaction.category)).reduce((sum, transaction) => sum + transaction.grossAmount, 0) / 6);
 
           console.log(`🚀 [Setu Mock Mode] Fetching Mock Decrypted Bank Statement Data`);
           console.log(`[Risk Simulation] AA consent metrics | SRI ${risk.score} | Action ${risk.action}`);
@@ -96,9 +95,11 @@ export async function POST(request: Request) {
             data: {
               account: {
                 transactions: accountTransactions,
-                summary: { balance: 145000, type: 'SAVINGS' }
-              }
-            }
+                summary: { balance: accountTransactions.at(-1)?.balance || 0, type: mockProfile.account.accountType, monthlyIncome, netMonthlyIncome: monthlyIncome, monthlyExpense, fixedMonthlyObligations, currentDtiPercent: Number((fixedMonthlyObligations / Math.max(monthlyIncome, 1) * 100).toFixed(2)), statementMonths: 6 }
+              },
+              profile: mockProfile,
+              underwriting: risk,
+            },
           });
         }
 

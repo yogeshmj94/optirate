@@ -4,11 +4,13 @@ export interface LoanApplicationSubmission {
   tenureMonths: number;
   lenderId: string;
   interestRate: number;
+  platformFeePercent?: number;
   riskScore?: number;
   riskAction?: 'ALLOW_AUCTION' | 'REVIEW' | 'BLOCK_AUCTION';
   riskReasons?: string[];
   borrowerId?: string;
   aaConsentId?: string;
+  auctionBids?: Array<Record<string, unknown>>;
 }
 
 export interface BlockedAuctionSubmission {
@@ -34,9 +36,11 @@ export function isLoanApplicationSubmission(value: unknown): value is LoanApplic
     body.tenureMonths > 0 &&
     typeof body.lenderId === 'string' &&
     typeof body.interestRate === 'number' &&
+    (body.platformFeePercent === undefined || (typeof body.platformFeePercent === 'number' && body.platformFeePercent >= 1 && body.platformFeePercent <= 1.5)) &&
     (body.riskScore === undefined || (typeof body.riskScore === 'number' && body.riskScore >= 0 && body.riskScore <= 100)) &&
     (body.riskAction === undefined || ['ALLOW_AUCTION', 'REVIEW', 'BLOCK_AUCTION'].includes(body.riskAction as string)) &&
-    (body.riskReasons === undefined || (Array.isArray(body.riskReasons) && body.riskReasons.every((reason) => typeof reason === 'string')))
+    (body.riskReasons === undefined || (Array.isArray(body.riskReasons) && body.riskReasons.every((reason) => typeof reason === 'string'))) &&
+    (body.auctionBids === undefined || (Array.isArray(body.auctionBids) && body.auctionBids.length <= 20 && body.auctionBids.every((bid) => typeof bid === 'object' && bid !== null && typeof (bid as Record<string, unknown>).lenderId === 'string' && typeof (bid as Record<string, unknown>).status === 'string')))
   );
 }
 

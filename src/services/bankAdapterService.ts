@@ -6,6 +6,10 @@ export interface StandardBorrowerProfile {
   creditScore: number;
   monthlyIncome: number;
   monthlyExpense: number;
+  fixedMonthlyObligations?: number;
+  cashflowRiskScore: number;
+  cashflowRiskAction: 'ALLOW_AUCTION' | 'REVIEW' | 'BLOCK_AUCTION';
+  borrowerSegment?: string;
 }
 
 // -----------------------------------------------------------------------------
@@ -22,6 +26,7 @@ export interface IDFCFirstRequest {
   CRED_SCOR_VAL: number;
   INC_MO_VAL: number;
   EXP_MO_VAL: number;
+  SRI_RISK_VAL: number;
 }
 
 export interface IDFCFirstResponse {
@@ -51,6 +56,7 @@ export interface NaviRequest {
     principalRequested: number;
     amortizationPeriodMonths: number;
   };
+  cashflow: { riskScore: number; action: StandardBorrowerProfile['cashflowRiskAction'] };
 }
 
 export interface NaviResponse {
@@ -73,6 +79,7 @@ export interface KotakRequest {
   CS_VAL: number;
   M_INC: number;
   M_EXP: number;
+  SRI: number;
 }
 
 export interface KotakResponse {
@@ -104,7 +111,8 @@ export class BankSchemaAdapter {
           TERM_MO_VAL: profile.tenureMonths,
           CRED_SCOR_VAL: profile.creditScore,
           INC_MO_VAL: profile.monthlyIncome,
-          EXP_MO_VAL: profile.monthlyExpense
+          EXP_MO_VAL: profile.monthlyExpense,
+          SRI_RISK_VAL: profile.cashflowRiskScore,
         } as IDFCFirstRequest;
 
       case 'lender_02': // Navi Finserv
@@ -113,14 +121,15 @@ export class BankSchemaAdapter {
             personal: { fullName: profile.fullName },
             financials: {
               monthlyRevenue: profile.monthlyIncome,
-              monthlyDebtObligations: profile.monthlyExpense
+              monthlyDebtObligations: profile.fixedMonthlyObligations || 0
             },
             riskProfile: { bureauScore: profile.creditScore }
           },
           deal: {
             principalRequested: profile.requiredAmount,
             amortizationPeriodMonths: profile.tenureMonths
-          }
+          },
+          cashflow: { riskScore: profile.cashflowRiskScore, action: profile.cashflowRiskAction },
         } as NaviRequest;
 
       case 'lender_03': // Kotak Mahindra Bank
@@ -130,7 +139,8 @@ export class BankSchemaAdapter {
           TEN_M: profile.tenureMonths,
           CS_VAL: profile.creditScore,
           M_INC: profile.monthlyIncome,
-          M_EXP: profile.monthlyExpense
+          M_EXP: profile.monthlyExpense,
+          SRI: profile.cashflowRiskScore,
         } as KotakRequest;
 
       default:

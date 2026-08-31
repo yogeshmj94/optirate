@@ -1,0 +1,1 @@
+{"priority":10,"request":{"method":"POST","urlPath":"/banks/summit/preapproved-offers"},"response":{"status":200,"jsonBody":{"DEC_CODE":"R01"},"headers":{"Content-Type":"application/json"},"fixedDelayMilliseconds":700}}

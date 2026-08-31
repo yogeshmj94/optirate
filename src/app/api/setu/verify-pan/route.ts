@@ -1,42 +1,10 @@
 import { NextResponse } from 'next/server';
-import { buildPanProfileTransactions, evaluateBorrower } from '@/services/riskEngine';
-
-const PAN_PROFILES: Record<string, { full_name: string; first_name: string; last_name: string; category: string; creditScore: number; isFirstTimeBorrower: boolean; monthlyIncome: number; monthlyExpense: number; sourceHash: string; behaviour: 'disciplined' | 'chaotic' | 'defaulter'; }> = {
+const PAN_PROFILES: Record<string, { full_name: string; first_name: string; last_name: string; category: string }> = {
   ABCDE1234A: {
     full_name: 'AAAAAA',
     first_name: 'AAAAAA',
     last_name: '',
     category: 'Individual or Person',
-    creditScore: 660,
-    isFirstTimeBorrower: true,
-    monthlyIncome: 120000,
-    monthlyExpense: 42000,
-    sourceHash: 'TATA_EMPLOYER_CORP_HASH',
-    behaviour: 'disciplined',
-  },
-  ABCDE1234B: {
-    full_name: 'BBBBBB',
-    first_name: 'BBBBBB',
-    last_name: '',
-    category: 'Individual or Person',
-    creditScore: 850,
-    isFirstTimeBorrower: false,
-    monthlyIncome: 160000,
-    monthlyExpense: 60000,
-    sourceHash: 'RANDOM_FI_SOURCE_HASH',
-    behaviour: 'chaotic',
-  },
-  ABCDE1234C: {
-    full_name: 'CCCCCC',
-    first_name: 'CCCCCC',
-    last_name: '',
-    category: 'Individual or Person',
-    creditScore: 420,
-    isFirstTimeBorrower: false,
-    monthlyIncome: 90000,
-    monthlyExpense: 120000,
-    sourceHash: 'UNSEASONED_SOURCE_HASH',
-    behaviour: 'defaulter',
   },
 };
 
@@ -58,15 +26,10 @@ export async function POST(request: Request) {
     if (isMockMode) {
       const profile = PAN_PROFILES[pan as keyof typeof PAN_PROFILES];
       if (!profile) {
-        return NextResponse.json({ error: 'PAN is invalid for simulated sandbox verification' }, { status: 400 });
+        return NextResponse.json({ error: 'Use Setu sandbox valid PAN ABCDE1234A. ABCDE1234B is reserved by Setu for invalid-PAN testing.' }, { status: 400 });
       }
 
-      const transactions = buildPanProfileTransactions(pan);
-      const risk = evaluateBorrower(transactions);
-
       console.log(`🚀 [Setu Mock Mode] Verifying Mock PAN: ${pan}`);
-      console.log(`[Risk Simulation] PAN ${pan} | ${profile.full_name} | Behaviour: ${profile.behaviour}`);
-      console.log(`[Risk Simulation] SRI ${risk.score} | Action ${risk.action}`);
 
       return NextResponse.json({
         verification: "SUCCESS",
@@ -79,11 +42,6 @@ export async function POST(request: Request) {
           last_name: profile.last_name,
           category: profile.category,
           aadhaar_seeding_status: "LINKED",
-          riskProfile: {
-            behaviour: profile.behaviour,
-            score: risk.score,
-            action: risk.action,
-          },
         },
         traceId: `mock-trace-${Date.now()}`
       });

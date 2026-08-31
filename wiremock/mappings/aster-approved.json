@@ -1,0 +1,1 @@
+{"priority":1,"request":{"method":"POST","urlPath":"/banks/aster/preapproved-offers","bodyPatterns":[{"matchesJsonPath":"$[?(@.CRED_SCOR_VAL >= 720)]"}]},"response":{"status":200,"jsonBody":{"TX_STATUS":"APRVD","RATE_ANN_PCT":10.25,"EMI_EST_MO_VAL":0,"FE_PROC_VAL":500,"OUTFLOW_TOT_VAL":0},"headers":{"Content-Type":"application/json"},"fixedDelayMilliseconds":420}}

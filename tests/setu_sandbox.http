@@ -2,22 +2,22 @@
 
 1. KYC Client Credentials (PAN Verification, BAV/Penny Drop)
 
-@kycClientId = 292c6e76-dabf-49c4-8e48-90fba2916673
-@kycClientSecret = 7IZMe9zvoBBuBukLiCP7n4KLwSOy11oP
-@panInstanceId = 439244ff-114e-41a8-ae74-a783f160622d
-@bavInstanceId = 9480d765-ebaf-4061-91d4-66af89c3e434
+@kycClientId = {{$dotenv SETU_KYC_CLIENT_ID}}
+@kycClientSecret = {{$dotenv SETU_KYC_CLIENT_SECRET}}
+@panInstanceId = {{$dotenv SETU_PAN_INSTANCE_ID}}
+@bavInstanceId = {{$dotenv SETU_BAV_INSTANCE_ID}}
 
 2. Aadhaar eSign Client Credentials
 
-@esignClientId = cdd36f9a-467a-423d-8fd0-474999426cd2
-@esignClientSecret = mcxnncpIzlXjcPt7hzu2jwhc1gxEW5NK
-@esignInstanceId = d957af7b-7271-4a2b-aa7e-4fc45e63581e
+@esignClientId = {{$dotenv SETU_ESIGN_CLIENT_ID}}
+@esignClientSecret = {{$dotenv SETU_ESIGN_CLIENT_SECRET}}
+@esignInstanceId = {{$dotenv SETU_ESIGN_INSTANCE_ID}}
 
 3. Account Aggregator OAuth Client Credentials
 
 @aaAuthUrl = https://orgservice-sandbox.setu.co/v1/users/login
-@aaClientId = ae0553f-f10f-475d-88ea-4a5f94ff3723
-@aaClientSecret = 1qfpRYp0pgQFuRUhrsIOvBj6vku15Yc2
+@aaClientId = {{$dotenv SETU_AA_CLIENT_ID}}
+@aaClientSecret = {{$dotenv SETU_AA_CLIENT_SECRET}}
 
 1. Account Aggregator Step 1: Exchange M2M Client Credentials for JWT Bearer Token
 
@@ -60,26 +60,11 @@ x-product-instance-id: {{bavInstanceId}}
 "ifsc": "HDFC0000123"
 }
 
-4. Aadhaar eSign Step 1: Generate Contract Draft Template
+4. Aadhaar eSign: check a signature request created by the application
 
 Note: uses eSign segregated Client ID, secret, and instance ID!
 
-POST {{dgBaseUrl}}/templates
-Content-Type: application/json
+GET {{dgBaseUrl}}/api/signature/{{$dotenv SETU_ESIGN_REQUEST_ID}}
 x-client-id: {{esignClientId}}
 x-client-secret: {{esignClientSecret}}
 x-product-instance-id: {{esignInstanceId}}
-
-{
-"template": "string",
-"parameters": {
-"name": ["2", "3"],
-"fundraiser": [4],
-"beneficiaryName": ["array [integer]"],
-"beneficiaryRelationship": ["array [integer]"],
-"date": ["array [integer]"],
-"amount": ["array [integer]"],
-"account": ["array [integer]"],
-"accountHolderRelationship": ["array [integer]"]
-}
-}

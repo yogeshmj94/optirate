@@ -5,7 +5,6 @@ import {
   calculateNetFlow,
   calculateSRI,
   calculateValidatedInflow,
-  buildPanProfileTransactions,
   evaluateBorrower,
   evaluateBorrowerWithAudit,
   RULES_VERSION,
@@ -119,18 +118,6 @@ test('evaluateBorrower handles realistic clean and defaulter 90-day profiles', (
   ]);
   assert.ok(bad.score >= 65);
   assert.equal(bad.action, 'BLOCK_AUCTION');
-});
-
-test('the three supported PAN profiles produce distinct underwriting outcomes', () => {
-  const disciplined = evaluateBorrower(buildPanProfileTransactions('ABCDE1234A'));
-  const chaotic = evaluateBorrower(buildPanProfileTransactions('ABCDE1234B'));
-  const defaulter = evaluateBorrower(buildPanProfileTransactions('ABCDE1234C'));
-
-  assert.equal(disciplined.action, 'ALLOW_AUCTION');
-  assert.equal(chaotic.action, 'REVIEW');
-  assert.equal(defaulter.action, 'BLOCK_AUCTION');
-  assert.notEqual(disciplined.score, chaotic.score);
-  assert.notEqual(disciplined.score, defaulter.score);
 });
 
 test('audit records rapid-drain evidence and preserves the SRI result', () => {

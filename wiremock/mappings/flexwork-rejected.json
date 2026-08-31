@@ -1,0 +1,1 @@
+{"priority":10,"request":{"method":"POST","urlPath":"/banks/flexwork/preapproved-offers"},"response":{"status":200,"jsonBody":{"decision":"REJECTED"},"headers":{"Content-Type":"application/json"},"fixedDelayMilliseconds":450}}

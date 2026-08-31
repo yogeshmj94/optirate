@@ -63,13 +63,18 @@ export const useAuctionState = () => {
 
       try {
         // Pass the captured cash-flow parameters directly into the scoring service
-        const bids = await runReverseAuction(
-          profile.requiredAmount,
-          profile.tenureMonths,
-          profile.creditScore,
-          profile.monthlyIncome ?? 100000,
-          profile.monthlyExpense ?? 30000
-        );
+        const bids = await runReverseAuction({
+          fullName: profile.fullName,
+          requiredAmount: profile.requiredAmount,
+          tenureMonths: profile.tenureMonths,
+          creditScore: profile.creditScore,
+          monthlyIncome: profile.monthlyIncome ?? 100000,
+          monthlyExpense: profile.monthlyExpense ?? 30000,
+          fixedMonthlyObligations: 0,
+          cashflowRiskScore: 0,
+          cashflowRiskAction: 'ALLOW_AUCTION',
+          borrowerSegment: 'unspecified',
+        });
 
         // Map the results back to the standard UI model
         const result: AuctionResponse = {

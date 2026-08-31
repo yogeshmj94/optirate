@@ -1,0 +1,1 @@
+{"priority":10,"request":{"method":"POST","urlPath":"/banks/aster/preapproved-offers"},"response":{"status":200,"jsonBody":{"TX_STATUS":"REJTD","RATE_ANN_PCT":0,"EMI_EST_MO_VAL":0,"FE_PROC_VAL":0,"OUTFLOW_TOT_VAL":0},"headers":{"Content-Type":"application/json"},"fixedDelayMilliseconds":350}}

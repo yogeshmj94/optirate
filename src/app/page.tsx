@@ -1,7 +1,8 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import { buildMockCashflowHistory, buildPanProfileTransactions, evaluateBorrower } from '@/services/riskEngine';
+import { evaluateBorrower } from '@/services/riskEngine';
+import { buildSixMonthStatement, getMockAAProfile, MOCK_AA_PROFILES, type MockAAProfileId } from '@/services/mockAAProfiles';
 
 // Unified interfaces for our compliant LSP workflow
 interface KYCData {
@@ -24,6 +25,8 @@ interface BankAccount {
   balance: number;
   monthlyIncome: number;
   monthlyExpense: number;
+  netMonthlyIncome: number;
+  fixedMonthlyObligations: number;
 }
 
 interface Bid {
@@ -37,6 +40,15 @@ interface Bid {
   totalPayout: number;
   rank: number;
   status: string;
+  platformFeePercent?: number;
+  marketBenchmarkRate?: number;
+  marketDiscountPercent?: number;
+  requestedTenureMonths?: number;
+  offeredTenureMonths?: number;
+  currentDtiPercent?: number;
+  projectedDtiPercent?: number;
+  maxDtiPercent?: number | null;
+  decisionReason?: string;
 }
 
 export default function Home() {
@@ -56,13 +68,14 @@ export default function Home() {
   const [webviewStep, setWebviewStep] = useState<'otp' | 'accounts' | 'success'>('otp');
   const [webviewOtp, setWebviewOtp] = useState<string>('123456');
   const [selectedFip, setSelectedFip] = useState<string>('Setu Mock Bank');
+  const [selectedProfileId, setSelectedProfileId] = useState<MockAAProfileId>('prime_clean');
   const [linkedBank, setLinkedBank] = useState<BankAccount | null>(null);
   const [consentId, setConsentId] = useState<string | null>(null);
 
   // Step 3 States (Reverse Auction Broadcast)
   const [requiredAmountInput, setRequiredAmountInput] = useState<string>('');
   const [tenureMonths, setTenureMonths] = useState<number>(36);
-  const [creditScore, setCreditScore] = useState<number>(740);
+  const [creditScore, setCreditScore] = useState<number>(790);
   const [auctionState, setAuctionState] = useState<'idle' | 'broadcasting' | 'completed'>('idle');
   const [auctionStepIndex, setAuctionStepIndex] = useState<number>(0);
   const [bids, setBids] = useState<Bid[]>([]);
@@ -70,27 +83,30 @@ export default function Home() {
 
   // Step 4 States (KFS & eSign)
   const [showESignModal, setShowESignModal] = useState<boolean>(false);
-  const [esignAadhaar, setEsignAadhaar] = useState<string>('1234 5678 9012');
   const [esignOtp, setEsignOtp] = useState<string>('123456');
+  const [esignRequestId, setEsignRequestId] = useState<string | null>(null);
+  const [esignMethod, setEsignMethod] = useState<'setu_hosted' | 'simulated_otp' | null>(null);
   const [disbursedTxId, setDisbursedTxId] = useState<string | null>(null);
   const completionRequestId = useRef<string>(crypto.randomUUID());
 
   const requiredAmount = Number(requiredAmountInput || 0);
 
   const riskSummary = useMemo(() => {
-    const profilePans = ['ABCDE1234A', 'ABCDE1234B', 'ABCDE1234C'];
-    const transactions = profilePans.includes(pan)
-      ? buildPanProfileTransactions(pan)
-      : buildMockCashflowHistory(mobileNumber === '9999999999' ? 'TATA_EMPLOYER_CORP_HASH' : 'BUSINESS_INFLOW_HASH');
-    return evaluateBorrower(transactions);
-  }, [mobileNumber, pan]);
+    return evaluateBorrower(buildSixMonthStatement(selectedProfileId));
+  }, [selectedProfileId]);
+  const expectedDtiPercent = useMemo(() => {
+    if (!linkedBank || requiredAmount <= 0 || tenureMonths <= 0) return linkedBank ? linkedBank.fixedMonthlyObligations / Math.max(linkedBank.netMonthlyIncome, 1) * 100 : 0;
+    const monthlyRate = 16 / 1200;
+    const expectedEmi = requiredAmount * monthlyRate * ((1 + monthlyRate) ** tenureMonths) / (((1 + monthlyRate) ** tenureMonths) - 1);
+    return (linkedBank.fixedMonthlyObligations + expectedEmi) / Math.max(linkedBank.netMonthlyIncome, 1) * 100;
+  }, [linkedBank, requiredAmount, tenureMonths]);
 
   // Reverse Auction step description logs
   const BROADCAST_LOGS = [
     'Establishing secure LSP connection to regulatory routing gateway...',
     `Layered underwriting: SRI ${riskSummary.score}, action ${riskSummary.action}.`,
-    `Broadcasting simulated Setu sandbox risk profile to 10 partner banks...`,
-    'Aggregating live, competitive rate bids from lending queues...'
+    'Broadcasting the application concurrently to 6 WireMock bank underwriting APIs...',
+    'Normalizing time-limited pre-approved offers and ranking them by APR...'
   ];
 
   const handleVerifyPAN = async (e: React.FormEvent) => {
@@ -132,7 +148,7 @@ export default function Home() {
       const response = await fetch('/api/setu/consent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'INITIATE', mobileNumber })
+        body: JSON.stringify({ action: 'INITIATE', mobileNumber, profileId: selectedProfileId })
       });
 
       const data = await response.json();
@@ -156,7 +172,7 @@ export default function Home() {
       const response = await fetch('/api/setu/consent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'CHECK_STATUS', consentId })
+        body: JSON.stringify({ action: 'CHECK_STATUS', consentId, profileId: selectedProfileId })
       });
 
       const data = await response.json();
@@ -174,7 +190,7 @@ export default function Home() {
       const sessionResponse = await fetch('/api/setu/consent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'CREATE_SESSION', consentId })
+        body: JSON.stringify({ action: 'CREATE_SESSION', consentId, profileId: selectedProfileId })
       });
       const sessionData = await sessionResponse.json();
       if (!sessionResponse.ok) throw new Error(sessionData.error || 'Data session creation failed');
@@ -182,27 +198,25 @@ export default function Home() {
       const dataResponse = await fetch('/api/setu/consent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'FETCH_DATA', sessionId: sessionData.sessionId })
+        body: JSON.stringify({ action: 'FETCH_DATA', sessionId: sessionData.sessionId, profileId: selectedProfileId })
       });
       const data = await dataResponse.json();
       if (!dataResponse.ok) throw new Error(data.error || 'Failed to fetch statement data');
 
-      const transactions = data.data?.account?.transactions || [];
-      const income = transactions
-        .filter((tx: any) => tx.type === 'CREDIT')
-        .reduce((sum: number, tx: any) => sum + tx.amount, 0) / Math.max(transactions.filter((tx: any) => tx.type === 'CREDIT').length, 1);
-      const expense = transactions
-        .filter((tx: any) => tx.type === 'DEBIT')
-        .reduce((sum: number, tx: any) => sum + tx.amount, 0) / Math.max(transactions.filter((tx: any) => tx.type === 'DEBIT').length, 1);
+      const income = data.data?.account?.summary?.monthlyIncome || 0;
+      const expense = data.data?.account?.summary?.monthlyExpense || 0;
 
       const mockStatement: BankAccount = {
         FIP: selectedFip,
         accountType: 'SAVINGS',
         balance: data.data?.account?.summary?.balance || 145000,
-        monthlyIncome: Math.round(income),
-        monthlyExpense: Math.round(expense)
+        monthlyIncome: income,
+        monthlyExpense: expense,
+        netMonthlyIncome: data.data?.account?.summary?.netMonthlyIncome || income,
+        fixedMonthlyObligations: data.data?.account?.summary?.fixedMonthlyObligations || 0,
       };
 
+      setCreditScore(data.data?.profile?.creditScore ?? getMockAAProfile(selectedProfileId).creditScore);
       setLinkedBank(mockStatement);
       setShowAAWebview(false);
       setCurrentStep(3);
@@ -241,97 +255,30 @@ export default function Home() {
   const generateCompetitiveBids = async () => {
     const income = linkedBank?.monthlyIncome || 120000;
     const expense = linkedBank?.monthlyExpense || 40000;
-
-    if (riskSummary.action === 'BLOCK_AUCTION') {
+    try {
+      const response = await fetch('/api/auction', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: kycResult?.data.full_name || 'Verified borrower', requiredAmount, tenureMonths,
+          creditScore, monthlyIncome: income, monthlyExpense: expense,
+          fixedMonthlyObligations: linkedBank?.fixedMonthlyObligations || 0,
+          cashflowRiskScore: riskSummary.score, cashflowRiskAction: riskSummary.action,
+          borrowerSegment: selectedProfileId,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to obtain lender offers.');
+      setBids(data.bids);
+      if (!data.bids.some((bid: Bid) => bid.status === 'Approved')) {
+        setErrorMessage('No bank returned a pre-approved offer for this profile.');
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to obtain lender offers.');
       setBids([]);
+    } finally {
       setAuctionState('completed');
-      try {
-        const response = await fetch('/api/loan-applications/blocked', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            completionRequestId: completionRequestId.current,
-            amount: requiredAmount,
-            tenureMonths,
-            riskScore: riskSummary.score,
-            riskAction: riskSummary.action,
-            riskReasons: riskSummary.reasons,
-            aaConsentId: consentId || undefined,
-          }),
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Unable to record blocked auction.');
-        setDisbursedTxId(data.applicationId);
-        setErrorMessage(`Auction blocked and recorded. ${riskSummary.reasons.join(' ')}`);
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : 'Unable to record blocked auction.');
-      }
-      return;
     }
-
-    const riskPremium = (riskSummary.score * 0.04) + Math.max(0, (700 - creditScore) * 0.003);
-    const priceBid = (
-      id: string,
-      lenderId: string,
-      lenderName: string,
-      baseInterestRate: number,
-      processingFeePercent: number,
-      rank: number,
-    ): Bid => {
-      const offeredRate = baseInterestRate + riskPremium;
-      const monthlyEMI = Math.round(calculateEmi(requiredAmount, offeredRate, tenureMonths));
-      const totalPayout = Math.round(
-        (monthlyEMI * tenureMonths) + (requiredAmount * (processingFeePercent / 100)),
-      );
-
-      return {
-        id,
-        lenderId,
-        lenderName,
-        baseInterestRate: offeredRate,
-        processingFeePercent,
-        calculatedAPR: Number((offeredRate + (processingFeePercent / (tenureMonths / 12))).toFixed(2)),
-        monthlyEMI,
-        totalPayout,
-        rank,
-        status: 'Approved',
-      };
-    };
-
-    // Simulate 3 diverse bank underwriting engines
-    const simulatedBids: Bid[] = [
-      {
-        ...priceBid('bid_idfc', 'lender_01', 'IDFC First Bank', 10.25, 0.5, 2),
-      },
-      {
-        ...priceBid('bid_navi', 'lender_02', 'Navi Finserv', 9.90, 0, 1),
-      },
-      {
-        ...priceBid('bid_kotak', 'lender_03', 'Kotak Mahindra Bank', 10.75, 0.8, 3),
-      }
-    ];
-
-    // Filter based on simulated dynamic Debt-To-Income thresholds
-    const filteredBids = simulatedBids.map(bid => {
-      const dtiRatio = (expense + bid.monthlyEMI) / income;
-      const riskGatePassed = riskSummary.action !== 'BLOCK_AUCTION';
-      if (dtiRatio > 0.55 || creditScore < 560 || !riskGatePassed) {
-        return { ...bid, status: 'Rejected', rank: 999 };
-      }
-      return bid;
-    });
-
-    // Re-sort and rank active approvals
-    const approved = filteredBids.filter(b => b.status === 'Approved').sort((a, b) => a.calculatedAPR - b.calculatedAPR);
-    approved.forEach((b, idx) => b.rank = idx + 1);
-
-    setBids([...approved, ...filteredBids.filter(b => b.status === 'Rejected')]);
-    setAuctionState('completed');
-  };
-
-  const calculateEmi = (p: number, r: number, n: number) => {
-    const monthlyRate = r / 12 / 100;
-    return (p * monthlyRate * Math.pow(1 + monthlyRate, n)) / (Math.pow(1 + monthlyRate, n) - 1);
   };
 
   const handleSelectBid = (bid: Bid) => {
@@ -351,30 +298,56 @@ export default function Home() {
     setWebviewStep('otp');
     setWebviewOtp('123456');
     setSelectedFip('Setu Mock Bank');
+    setSelectedProfileId('prime_clean');
     setLinkedBank(null);
     setConsentId(null);
     setRequiredAmountInput('');
     setTenureMonths(36);
-    setCreditScore(740);
+    setCreditScore(790);
     setAuctionState('idle');
     setAuctionStepIndex(0);
     setBids([]);
     setSelectedBid(null);
     setShowESignModal(false);
-    setEsignAadhaar('1234 5678 9012');
     setEsignOtp('123456');
+    setEsignRequestId(null);
+    setEsignMethod(null);
     setDisbursedTxId(null);
     completionRequestId.current = crypto.randomUUID();
   };
 
-  const handleTriggerESign = () => {
-    setShowESignModal(true);
-    setWebviewStep('otp'); // reuse webview screen state helper for modal views
+  const handleTriggerESign = async (method: 'setu_hosted' | 'simulated_otp') => {
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      const response = await fetch('/api/setu/esign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: method === 'simulated_otp' ? 'SIMULATE_INITIATE' : 'INITIATE', signerIdentifier: mobileNumber, displayName: kycResult?.data.full_name || 'Verified borrower' }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Unable to initiate Aadhaar eSign.');
+      setEsignMethod(method);
+      setEsignRequestId(data.id);
+      const signingUrl = data.url || data.signingUrl || data.redirectUrl;
+      if (method === 'setu_hosted' && signingUrl) window.open(signingUrl, '_blank', 'noopener,noreferrer');
+      else if (method === 'simulated_otp') setShowESignModal(true);
+      else throw new Error('Setu did not return a hosted signing URL.');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to initiate Aadhaar eSign.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleFinalizeAgreement = async () => {
     setLoading(true);
     try {
+      if (esignRequestId && esignMethod === 'simulated_otp') {
+        const verifyResponse = await fetch('/api/setu/esign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'SIMULATE_VERIFY', id: esignRequestId, otp: esignOtp }) });
+        const verification = await verifyResponse.json();
+        if (!verifyResponse.ok || verification.status !== 'sign_complete') throw new Error(verification.error || 'Simulated Aadhaar OTP verification failed.');
+      } else if (esignRequestId && esignMethod === 'setu_hosted') {
+        const statusResponse = await fetch('/api/setu/esign', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'STATUS', id: esignRequestId }) });
+        const status = await statusResponse.json();
+        if (!statusResponse.ok || status.status !== 'sign_complete') throw new Error('The Setu signature request is not complete yet.');
+      }
       // Record the marketplace outcome; the lender owns disbursement and repayment records.
       const response = await fetch('/api/loan-applications/complete', {
         method: 'POST',
@@ -384,9 +357,11 @@ export default function Home() {
           lenderId: selectedBid?.lenderId,
           lenderName: selectedBid?.lenderName,
           amount: requiredAmount,
-          tenureMonths,
+          tenureMonths: selectedBid?.offeredTenureMonths || tenureMonths,
           borrowerName: kycResult?.data.full_name || "Yogesha M J",
           interestRate: selectedBid?.calculatedAPR || 0,
+          platformFeePercent: selectedBid?.platformFeePercent || 0,
+          auctionBids: bids,
           riskScore: riskSummary.score,
           riskAction: riskSummary.action,
           riskReasons: riskSummary.reasons
@@ -576,20 +551,20 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Credit Score</label>
-                  <input 
-                    type="range" 
-                    min="300" 
-                    max="900" 
-                    value={creditScore}
-                    onChange={(e) => setCreditScore(Number(e.target.value))}
-                    className="w-full accent-indigo-500" 
-                  />
-                  <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                    <span>300 (Poor)</span>
-                    <span className="text-indigo-400 font-bold">{creditScore}</span>
-                    <span>900 (Excellent)</span>
+                  <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Bureau profile</label>
+                  <div className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 flex justify-between text-xs">
+                    <span className="text-slate-400">{getMockAAProfile(selectedProfileId).bureauStatus.replace(/_/g, ' ')}</span>
+                    <span className="text-indigo-400 font-bold">{creditScore === 0 ? 'No credit history' : creditScore}</span>
                   </div>
+                </div>
+
+                <div className="bg-indigo-950/30 border border-indigo-800/40 rounded-xl p-3 space-y-2">
+                  <div className="text-[10px] uppercase tracking-wider text-indigo-300 font-bold">AA affordability snapshot</div>
+                  <div className="flex justify-between text-xs"><span className="text-slate-400">Net monthly income credited</span><span className="font-mono">₹{(linkedBank?.netMonthlyIncome || 0).toLocaleString()}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-slate-400">Fixed monthly obligations</span><span className="font-mono">₹{(linkedBank?.fixedMonthlyObligations || 0).toLocaleString()}</span></div>
+                  <div className="flex justify-between text-xs"><span className="text-slate-400">Current DTI</span><span className="font-mono">{((linkedBank?.fixedMonthlyObligations || 0) / Math.max(linkedBank?.netMonthlyIncome || 1, 1) * 100).toFixed(2)}%</span></div>
+                  <div className="flex justify-between text-xs border-t border-indigo-800/40 pt-2"><span className="text-slate-300 font-bold">Expected DTI at requested tenure</span><span className="font-mono text-amber-300 font-bold">{expectedDtiPercent.toFixed(2)}%</span></div>
+                  <p className="text-[9px] text-slate-500">Expected DTI uses an indicative 16% rate. Each lender recalculates it using its offered rate and tenure.</p>
                 </div>
 
                 <div className="bg-slate-900 border border-slate-850 rounded-xl p-3 space-y-2">
@@ -654,6 +629,8 @@ export default function Home() {
                             <th className="py-3 px-2">Lender</th>
                             <th className="py-3 px-2">True APR</th>
                             <th className="py-3 px-2">Monthly EMI</th>
+                            <th className="py-3 px-2">Tenure</th>
+                            <th className="py-3 px-2">Projected DTI</th>
                             <th className="py-3 px-2">Status</th>
                             <th className="py-3 px-2 text-right">Action</th>
                           </tr>
@@ -664,13 +641,15 @@ export default function Home() {
                               <td className="py-4 px-2 font-bold text-indigo-400">
                                 {bid.status === 'Approved' ? `#${bid.rank}` : '—'}
                               </td>
-                              <td className="py-4 px-2 font-medium">{bid.lenderName}</td>
+                              <td className="py-4 px-2 font-medium"><span className="block">{bid.lenderName}</span><span className="block text-[9px] text-slate-500 max-w-[220px]">{bid.decisionReason}</span></td>
                               <td className="py-4 px-2 font-mono text-emerald-400">
                                 {bid.status === 'Approved' ? `${bid.calculatedAPR.toFixed(2)}%` : '—'}
                               </td>
                               <td className="py-4 px-2 font-mono">
                                 {bid.status === 'Approved' ? `₹${bid.monthlyEMI.toLocaleString()}` : '—'}
                               </td>
+                              <td className="py-4 px-2 font-mono">{bid.status === 'Approved' ? `${bid.offeredTenureMonths} mo${bid.offeredTenureMonths !== bid.requestedTenureMonths ? ' (adjusted)' : ''}` : '—'}</td>
+                              <td className="py-4 px-2 font-mono">{bid.projectedDtiPercent?.toFixed(2)}%{bid.maxDtiPercent !== null && bid.maxDtiPercent !== undefined ? ` / ${bid.maxDtiPercent}%` : ''}</td>
                               <td className="py-4 px-2">
                                 <span className={`text-xs font-semibold ${bid.status === 'Approved' ? 'text-emerald-400' : 'text-slate-600'}`}>
                                   {bid.status}
@@ -685,7 +664,7 @@ export default function Home() {
                                     Accept Offer
                                   </button>
                                 ) : (
-                                  <span className="text-xs text-slate-500">DTI Limit Breached</span>
+                                  <span className="text-xs text-slate-500">Policy declined</span>
                                 )}
                               </td>
                             </tr>
@@ -698,7 +677,7 @@ export default function Home() {
 
                 {auctionState === 'completed' && bids.length === 0 && (
                   <div className="flex flex-col items-center justify-center py-24 text-center">
-                    <p className="font-medium text-amber-300 text-sm">Auction blocked by underwriting</p>
+                    <p className="font-medium text-amber-300 text-sm">No lender matched this application</p>
                     <p className="text-xs text-slate-500 mt-2 max-w-md">
                       This decision was recorded for audit. No lender bids or disbursement records were created.
                     </p>
@@ -765,17 +744,31 @@ export default function Home() {
                   <span className="font-bold text-slate-800">₹{selectedBid.processingFeePercent > 0 ? (requiredAmount * (selectedBid.processingFeePercent / 100)).toLocaleString() : '0'}</span>
                 </div>
                 <div className="flex justify-between border-b border-slate-200 pb-2">
-                  <span className="text-xs text-slate-500 font-bold">3. Total Interest Rate:</span>
+                  <span className="text-xs text-slate-500 font-bold">3. OptiRate Platform Fee ({selectedBid.platformFeePercent || 0}%):</span>
+                  <span className="font-bold text-slate-800">₹{(requiredAmount * ((selectedBid.platformFeePercent || 0) / 100)).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between border-b border-slate-200 pb-2">
+                  <span className="text-xs text-slate-500 font-bold">4. Lender Interest Rate:</span>
                   <span className="font-bold text-emerald-600">{selectedBid.baseInterestRate}% p.a.</span>
                 </div>
                 <div className="flex justify-between border-b-2 border-slate-300 pb-2 bg-slate-100/50 -mx-3 px-3 rounded">
-                  <span className="text-xs text-slate-600 font-bold">4. True Annual Percentage Rate (APR):</span>
+                  <span className="text-xs text-slate-600 font-bold">5. True APR including all upfront fees:</span>
                   <span className="font-extrabold text-indigo-700">{selectedBid.calculatedAPR}%</span>
                 </div>
                 <div className="flex justify-between pt-1">
-                  <span className="text-xs text-slate-500 font-bold">5. Monthly EMI Obligation:</span>
+                  <span className="text-xs text-slate-500 font-bold">6. Monthly EMI Obligation:</span>
                   <span className="font-bold text-slate-800">₹{selectedBid.monthlyEMI.toLocaleString()}</span>
                 </div>
+                <div className="flex justify-between pt-1">
+                  <span className="text-xs text-slate-500 font-bold">7. Offered tenure / projected DTI:</span>
+                  <span className="font-bold text-slate-800">{selectedBid.offeredTenureMonths || tenureMonths} months / {selectedBid.projectedDtiPercent?.toFixed(2)}%</span>
+                </div>
+                {selectedBid.marketDiscountPercent !== undefined && selectedBid.marketDiscountPercent > 0 && (
+                  <div className="flex justify-between pt-2 text-emerald-700">
+                    <span className="text-xs font-bold">Below researched market benchmark:</span>
+                    <span className="font-bold">{selectedBid.marketDiscountPercent}%</span>
+                  </div>
+                )}
               </div>
 
               {/* Legal protection context */}
@@ -792,12 +785,18 @@ export default function Home() {
               >
                 Back to Bids
               </button>
-              <button 
-                onClick={handleTriggerESign}
-                className="px-6 py-3 bg-slate-900 hover:bg-slate-850 text-white font-bold rounded-xl text-sm transition-colors shadow-lg"
-              >
-                Accept and eSign Contract &rarr;
+              <button onClick={() => void handleTriggerESign('simulated_otp')} disabled={loading} className="px-5 py-3 border border-indigo-300 text-indigo-700 hover:bg-indigo-50 font-bold rounded-xl text-sm transition-colors disabled:opacity-50">
+                Simulated Aadhaar OTP
               </button>
+              {esignMethod === 'setu_hosted' && esignRequestId ? (
+                <button onClick={() => void handleFinalizeAgreement()} disabled={loading} className="px-6 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-sm transition-colors shadow-lg disabled:opacity-50">
+                  Check Setu Signature & Continue
+                </button>
+              ) : (
+                <button onClick={() => void handleTriggerESign('setu_hosted')} disabled={loading} className="px-6 py-3 bg-slate-900 hover:bg-slate-850 text-white font-bold rounded-xl text-sm transition-colors shadow-lg disabled:opacity-50">
+                  Setu Hosted eSign &rarr;
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -815,7 +814,7 @@ export default function Home() {
             </div>
             <h2 className="text-3xl font-extrabold text-slate-100 mb-2">Loan Approved!</h2>
             <p className="text-sm text-slate-400 mb-6">
-              Your digital contract with <strong>{selectedBid.lenderName}</strong> has been signed via Aadhaar eSign and mapped into the central core banking registry.
+              Your digital contract with <strong>{selectedBid.lenderName}</strong> has been signed via {esignMethod === 'simulated_otp' ? 'the simulated Aadhaar OTP demo' : 'Setu hosted Aadhaar eSign'} and mapped into the central core banking registry.
             </p>
 
             <div className="bg-slate-900 border border-slate-850 rounded-2xl p-4 text-left space-y-2 mb-6 text-xs font-mono">
@@ -890,20 +889,21 @@ export default function Home() {
                 <p className="text-xs text-slate-500">Choose the simulated financial account to link with this loan verification request.</p>
                 
                 <div className="space-y-2">
-                  {['Setu Mock Bank', 'HDFC Core Mock Bank', 'ICICI Core Mock Bank'].map((bankName) => (
+                  {MOCK_AA_PROFILES.map((profile) => (
                     <div 
-                      key={bankName}
-                      onClick={() => setSelectedFip(bankName)}
+                      key={profile.id}
+                      onClick={() => { setSelectedProfileId(profile.id); setSelectedFip(profile.account.fip); setCreditScore(profile.creditScore); }}
                       className={`p-3.5 border rounded-xl cursor-pointer flex justify-between items-center transition-all
-                        ${selectedFip === bankName ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
+                        ${selectedProfileId === profile.id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
                     >
                       <div className="text-left">
-                        <span className="font-bold text-xs text-slate-800 block">{bankName}</span>
-                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">SAVINGS •••• 9876</span>
+                        <span className="font-bold text-xs text-slate-800 block">{profile.label}</span>
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wide">{profile.cashflowBehaviour} CASHFLOW · {profile.creditScore || 'NO'} BUREAU SCORE · {profile.account.maskedAccountNumber}</span>
+                        <span className="text-[10px] text-slate-500 block mt-1">{profile.description}</span>
                       </div>
                       <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center
-                        ${selectedFip === bankName ? 'border-indigo-600' : 'border-slate-300'}`}>
-                        {selectedFip === bankName && <div className="w-2 h-2 bg-indigo-600 rounded-full"></div>}
+                        ${selectedProfileId === profile.id ? 'border-indigo-600' : 'border-slate-300'}`}>
+                        {selectedProfileId === profile.id && <div className="w-2 h-2 bg-indigo-600 rounded-full"></div>}
                       </div>
                     </div>
                   ))}
@@ -937,27 +937,18 @@ export default function Home() {
 
             <div className="p-6 space-y-4">
               <h3 className="text-md font-bold text-slate-800">Complete Digital Contract Signing</h3>
-              <p className="text-xs text-slate-500">Your pre-approved Key Fact Statement (KFS) contract requires an authenticated signature.</p>
+              <p className="text-xs text-slate-500">Simulation only: an OTP was sent to the Aadhaar-linked mobile ending in <strong>{mobileNumber.slice(-4)}</strong>. No Aadhaar number is collected or stored.</p>
 
               <div className="space-y-3">
                 <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Aadhaar ID Number</label>
-                  <input 
-                    type="text" 
-                    value={esignAadhaar}
-                    onChange={(e) => setEsignAadhaar(e.target.value)}
-                    className="w-full border border-slate-300 rounded-lg p-2.5 text-center font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" 
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Enter OTP</label>
+                  <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Mock confirmation code</label>
                   <input 
                     type="text" 
                     value={esignOtp}
                     onChange={(e) => setEsignOtp(e.target.value)}
                     className="w-full border border-slate-300 rounded-lg p-2.5 text-center font-mono tracking-widest text-base focus:outline-none focus:ring-2 focus:ring-indigo-500" 
                   />
-                  <span className="text-[10px] text-slate-400 mt-1 block">A secure signature code has been simulated for your session.</span>
+                  <span className="text-[10px] text-slate-400 mt-1 block">Demo OTP: <strong>123456</strong>. This does not contact UIDAI or Setu.</span>
                 </div>
               </div>
 

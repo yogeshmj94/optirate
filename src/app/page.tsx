@@ -168,6 +168,8 @@ export default function Home() {
       return;
     }
 
+    setLoading(true);
+    setErrorMessage(null);
     try {
       const response = await fetch('/api/setu/consent', {
         method: 'POST',
@@ -182,10 +184,14 @@ export default function Home() {
       setWebviewStep('accounts');
     } catch (err: any) {
       setErrorMessage(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleCompleteConsentWebview = async () => {
+    setLoading(true);
+    setErrorMessage(null);
     try {
       const sessionResponse = await fetch('/api/setu/consent', {
         method: 'POST',
@@ -222,6 +228,8 @@ export default function Home() {
       setCurrentStep(3);
     } catch (err: any) {
       setErrorMessage(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -849,7 +857,7 @@ export default function Home() {
       {}
       {showAAWebview && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-filter backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white text-slate-900 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
+          <div className="bg-white text-slate-900 rounded-2xl shadow-2xl max-w-md w-full max-h-[calc(100dvh-2rem)] overflow-hidden border border-slate-200 flex flex-col">
             {/* Header */}
             <div className="bg-indigo-650 text-white p-4 flex items-center justify-between">
               <span className="text-xs uppercase font-extrabold tracking-widest text-indigo-100">Secure Bank Consent</span>
@@ -884,41 +892,49 @@ export default function Home() {
 
             {/* Account Selection Phase */}
             {webviewStep === 'accounts' && (
-              <div className="p-6 space-y-4">
-                <h3 className="text-md font-bold text-slate-800 font-sans">Available Bank Profiles</h3>
-                <p className="text-xs text-slate-500">Choose the simulated financial account to link with this loan verification request.</p>
-                
-                <div className="space-y-2">
+              <div className="min-h-0 flex flex-1 flex-col">
+                <div className="px-6 pt-5 pb-3 border-b border-slate-200">
+                  <h3 className="text-md font-bold text-slate-800 font-sans">Available Bank Profiles</h3>
+                  <p className="text-xs text-slate-500 mt-1">Choose a simulated financial account, then continue with the fixed button below.</p>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-3 space-y-2" role="radiogroup" aria-label="Simulated borrower persona">
                   {MOCK_AA_PROFILES.map((profile) => (
-                    <div 
+                    <button
+                      type="button"
                       key={profile.id}
                       onClick={() => { setSelectedProfileId(profile.id); setSelectedFip(profile.account.fip); setCreditScore(profile.creditScore); }}
-                      className={`p-3.5 border rounded-xl cursor-pointer flex justify-between items-center transition-all
+                      role="radio"
+                      aria-checked={selectedProfileId === profile.id}
+                      className={`w-full p-3.5 border rounded-xl cursor-pointer flex justify-between items-center transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500
                         ${selectedProfileId === profile.id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-slate-50 hover:bg-slate-100'}`}
                     >
-                      <div className="text-left">
+                      <span className="text-left pr-3">
                         <span className="font-bold text-xs text-slate-800 block">{profile.label}</span>
                         <span className="text-[10px] text-slate-500 uppercase tracking-wide">{profile.cashflowBehaviour} CASHFLOW · {profile.creditScore || 'NO'} BUREAU SCORE · {profile.account.maskedAccountNumber}</span>
                         <span className="text-[10px] text-slate-500 block mt-1">{profile.description}</span>
-                      </div>
-                      <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center
+                      </span>
+                      <span aria-hidden="true" className={`w-4 h-4 shrink-0 rounded-full border-2 flex items-center justify-center
                         ${selectedProfileId === profile.id ? 'border-indigo-600' : 'border-slate-300'}`}>
-                        {selectedProfileId === profile.id && <div className="w-2 h-2 bg-indigo-600 rounded-full"></div>}
-                      </div>
-                    </div>
+                        {selectedProfileId === profile.id && <span className="w-2 h-2 bg-indigo-600 rounded-full"></span>}
+                      </span>
+                    </button>
                   ))}
                 </div>
 
-                <div className="text-[10px] text-slate-400 leading-relaxed border-t pt-3">
-                  By clicking approve, you grant permission to securely analyze the latest transaction history for underwriting checks.
+                <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4 shadow-[0_-8px_20px_rgba(15,23,42,0.08)]">
+                  <p className="text-[10px] text-slate-500 leading-relaxed mb-3">
+                    Selected: <strong className="text-slate-700">{getMockAAProfile(selectedProfileId).label}</strong>. Continuing grants permission to analyze its six-month simulated statement.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleCompleteConsentWebview()}
+                    disabled={loading}
+                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 text-white font-bold rounded-xl text-sm transition-colors"
+                  >
+                    {loading ? 'Linking selected profile…' : 'Continue with selected profile →'}
+                  </button>
                 </div>
-
-                <button 
-                  onClick={handleCompleteConsentWebview}
-                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-sm transition-colors"
-                >
-                  Approve and Link Consent &rarr;
-                </button>
               </div>
             )}
           </div>

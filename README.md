@@ -174,7 +174,7 @@ Start WireMock and Postgres with `docker compose up -d`. The lender stubs live u
 
 The mock pricing is anchored to published lender pricing checked in August 2026. Fibe publishes new-to-credit availability with personal-loan rates starting at 18%; Moneyview publishes self-employed pricing from 14% and overall APRs of 17–45%; Bajaj Finance publishes 14–23% for its self-employed personal-loan product; and KreditBee publishes 12–27.5% for proprietorship borrowers. Because advertised starting rates are not guaranteed offers, OptiRate treats 18% as the demonstration benchmark for general no-history/gig profiles and 14% as the lower-bound benchmark for documented self-employed profiles.
 
-Mock lenders target rates 1–2 percentage points below the applicable benchmark when the six-month cashflow is disciplined. The platform fee is disclosed separately at 1.5% for no-history applicants and 1% for established-credit applicants. True APR includes both lender processing fees and the platform fee.
+Mock lenders target rates 1–2 percentage points below the applicable benchmark when the six-month cashflow is disciplined, with specialist lenders giving the full two-point discount to disciplined first-time gig and small-business borrowers. OptiRate is compensated by lenders from their existing acquisition budgets; no platform charge is passed to borrowers or included in borrower APR. True APR includes only lender charges payable by the borrower.
 
 - https://www.fibe.in/personal-loan/
 - https://moneyview.in/loans/instant-personal-loan-for-self-employed
@@ -191,6 +191,8 @@ PAN verification uses Setu's `POST /api/verify/pan` contract when KYC credential
 
 - Setu Hosted eSign: creates a Setu signature request, opens the hosted Aadhaar/OTP screen in a new tab, and checks Setu's signature status before completion.
 - Simulated Aadhaar OTP: local demonstration fallback using OTP `123456`; it never calls Setu or UIDAI and never asks for or stores an Aadhaar number.
+
+The hosted option is shown only when all five required eSign variables are present: `SETU_ESIGN_CLIENT_ID`, `SETU_ESIGN_CLIENT_SECRET`, `SETU_ESIGN_INSTANCE_ID`, `SETU_ESIGN_DOCUMENT_ID`, and `SETU_ESIGN_REDIRECT_URL`. Setu returns the hosted URL under the first signer record; the application normalizes that URL before opening the hosted flow.
 
 The single valid sandbox PAN is only the identity fixture. Credit and cashflow personas are selected independently after the simulated AA consent, so all four underwriting scenarios can reuse `ABCDE1234A` without pretending that PAN determines financial behavior. `ABCDE1234B` remains available only for testing PAN-verification failure.
 
@@ -295,7 +297,7 @@ When deploying to Vercel:
 
 - The current repository is a working prototype rather than a production-grade lender platform.
 - The onboarding and auction experience is intentionally mock-friendly so it can be demonstrated without external services.
-- Prisma/Postgres stores marketplace applications, bids, risk audit records, platform fee bookkeeping entries, and read-only lender outcome snapshots. It does not store a loan repayment schedule or own the lender's loan ledger.
+- Prisma/Postgres stores marketplace applications, bids, risk audit records, lender-paid acquisition commission bookkeeping entries, and read-only lender outcome snapshots. It does not store a loan repayment schedule or own the lender's loan ledger.
 - The risk metrics are intentionally backend-only; they are logged in the server terminal during the consent and verification flow rather than displayed to end users.
 - Demo credentials and OTPs are embedded in the UI for the sandbox-style flow.
 

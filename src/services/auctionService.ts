@@ -102,7 +102,7 @@ export async function runReverseAuction(profile: StandardBorrowerProfile): Promi
       riskTier: profile.cashflowRiskScore >= 65 ? 'HIGH' : profile.cashflowRiskScore >= 36 ? 'MEDIUM' : 'LOW',
       lenderCommissionPercent: bank.commissionPercent, marketBenchmarkRate, marketDiscountPercent: approved ? Number((marketBenchmarkRate - normalized.interestRate).toFixed(2)) : 0,
       requestedTenureMonths: profile.tenureMonths, offeredTenureMonths: decision.offeredTenure,
-      currentDtiPercent: Number((decision.currentDti * 100).toFixed(2)), projectedDtiPercent: Number((decision.projectedDti * 100).toFixed(2)), maxDtiPercent: decision.maxDti === null ? null : decision.maxDti * 100,
+      currentDtiPercent: Number((decision.currentDti * 100).toFixed(2)), projectedDtiPercent: Number((decision.projectedDti * 100).toFixed(2)), maxDtiPercent: decision.maxDti === null ? null : Number((decision.maxDti * 100).toFixed(2)),
       decisionReason: `${decision.reason}; response source: ${source}`,
     };
   }));

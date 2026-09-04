@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -6,7 +6,11 @@ export const metadata: Metadata = {
   description: 'Find the best loan rates in seconds. optirate auctions your loan profile across 12+ partner lenders to get you the lowest APR.',
   keywords: ['loan', 'auction', 'rates', 'personal loan', 'lowest APR', 'FinBox'],
   authors: [{ name: 'optirate team' }],
-  viewport: 'width=device-width, initial-scale=1',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 };
 
 export default function RootLayout({

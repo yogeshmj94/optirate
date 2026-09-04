@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { evaluateBorrower } from '@/services/riskEngine';
 import { buildSixMonthStatement, getMockAAProfile, MOCK_AA_PROFILES, type MockAAProfileId } from '@/services/mockAAProfiles';
 
@@ -40,7 +40,7 @@ interface Bid {
   totalPayout: number;
   rank: number;
   status: string;
-  platformFeePercent?: number;
+  lenderCommissionPercent?: number;
   marketBenchmarkRate?: number;
   marketDiscountPercent?: number;
   requestedTenureMonths?: number;
@@ -87,9 +87,21 @@ export default function Home() {
   const [esignRequestId, setEsignRequestId] = useState<string | null>(null);
   const [esignMethod, setEsignMethod] = useState<'setu_hosted' | 'simulated_otp' | null>(null);
   const [disbursedTxId, setDisbursedTxId] = useState<string | null>(null);
+  const [hostedESignAvailable, setHostedESignAvailable] = useState<boolean>(false);
+  const [hostedESignEnvironment, setHostedESignEnvironment] = useState<string>('sandbox');
   const completionRequestId = useRef<string>(crypto.randomUUID());
 
   const requiredAmount = Number(requiredAmountInput || 0);
+
+  useEffect(() => {
+    void fetch('/api/setu/esign', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((configuration) => {
+        setHostedESignAvailable(configuration.hostedAvailable === true);
+        setHostedESignEnvironment(configuration.environment || 'sandbox');
+      })
+      .catch(() => setHostedESignAvailable(false));
+  }, []);
 
   const riskSummary = useMemo(() => {
     return evaluateBorrower(buildSixMonthStatement(selectedProfileId));
@@ -325,6 +337,7 @@ export default function Home() {
   };
 
   const handleTriggerESign = async (method: 'setu_hosted' | 'simulated_otp') => {
+    const hostedWindow = method === 'setu_hosted' ? window.open('about:blank', '_blank') : null;
     setLoading(true);
     setErrorMessage(null);
     try {
@@ -333,11 +346,16 @@ export default function Home() {
       if (!response.ok) throw new Error(data.error || 'Unable to initiate Aadhaar eSign.');
       setEsignMethod(method);
       setEsignRequestId(data.id);
-      const signingUrl = data.url || data.signingUrl || data.redirectUrl;
-      if (method === 'setu_hosted' && signingUrl) window.open(signingUrl, '_blank', 'noopener,noreferrer');
+      const signingUrl = data.signingUrl || data.signers?.[0]?.url || data.url;
+      if (method === 'setu_hosted' && signingUrl && hostedWindow) {
+        hostedWindow.opener = null;
+        hostedWindow.location.href = signingUrl;
+      }
+      else if (method === 'setu_hosted' && signingUrl) throw new Error('Your browser blocked the Setu signing window. Allow pop-ups and try again.');
       else if (method === 'simulated_otp') setShowESignModal(true);
       else throw new Error('Setu did not return a hosted signing URL.');
     } catch (error) {
+      hostedWindow?.close();
       setErrorMessage(error instanceof Error ? error.message : 'Unable to initiate Aadhaar eSign.');
     } finally {
       setLoading(false);
@@ -368,7 +386,7 @@ export default function Home() {
           tenureMonths: selectedBid?.offeredTenureMonths || tenureMonths,
           borrowerName: kycResult?.data.full_name || "Yogesha M J",
           interestRate: selectedBid?.calculatedAPR || 0,
-          platformFeePercent: selectedBid?.platformFeePercent || 0,
+          lenderCommissionPercent: selectedBid?.lenderCommissionPercent || 0,
           auctionBids: bids,
           riskScore: riskSummary.score,
           riskAction: riskSummary.action,
@@ -606,7 +624,7 @@ export default function Home() {
 
             {/* Right side live feedback dashboard */}
             {}
-            <div className="lg:col-span-8 bg-slate-950 border border-slate-800 p-6 rounded-2xl shadow-xl min-h-[400px] flex flex-col justify-between">
+            <div className="lg:col-span-8 bg-slate-950 border border-slate-800 p-5 sm:p-7 rounded-2xl shadow-xl min-h-[400px] flex flex-col justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-100 mb-4 border-b border-slate-850 pb-3">Auction Engine Results</h2>
                 
@@ -629,57 +647,43 @@ export default function Home() {
 
                 {auctionState === 'completed' && bids.length > 0 && (
                   <div className="space-y-4">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b border-slate-850 text-[10px] text-slate-500 uppercase tracking-widest">
-                            <th className="py-3 px-2">Rank</th>
-                            <th className="py-3 px-2">Lender</th>
-                            <th className="py-3 px-2">True APR</th>
-                            <th className="py-3 px-2">Monthly EMI</th>
-                            <th className="py-3 px-2">Tenure</th>
-                            <th className="py-3 px-2">Projected DTI</th>
-                            <th className="py-3 px-2">Status</th>
-                            <th className="py-3 px-2 text-right">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-850 text-sm">
-                          {bids.map((bid) => (
-                            <tr key={bid.id} className="hover:bg-slate-900/40 transition-colors">
-                              <td className="py-4 px-2 font-bold text-indigo-400">
-                                {bid.status === 'Approved' ? `#${bid.rank}` : '—'}
-                              </td>
-                              <td className="py-4 px-2 font-medium"><span className="block">{bid.lenderName}</span><span className="block text-[9px] text-slate-500 max-w-[220px]">{bid.decisionReason}</span></td>
-                              <td className="py-4 px-2 font-mono text-emerald-400">
-                                {bid.status === 'Approved' ? `${bid.calculatedAPR.toFixed(2)}%` : '—'}
-                              </td>
-                              <td className="py-4 px-2 font-mono">
-                                {bid.status === 'Approved' ? `₹${bid.monthlyEMI.toLocaleString()}` : '—'}
-                              </td>
-                              <td className="py-4 px-2 font-mono">{bid.status === 'Approved' ? `${bid.offeredTenureMonths} mo${bid.offeredTenureMonths !== bid.requestedTenureMonths ? ' (adjusted)' : ''}` : '—'}</td>
-                              <td className="py-4 px-2 font-mono">{bid.projectedDtiPercent?.toFixed(2)}%{bid.maxDtiPercent !== null && bid.maxDtiPercent !== undefined ? ` / ${bid.maxDtiPercent}%` : ''}</td>
-                              <td className="py-4 px-2">
-                                <span className={`text-xs font-semibold ${bid.status === 'Approved' ? 'text-emerald-400' : 'text-slate-600'}`}>
-                                  {bid.status}
-                                </span>
-                              </td>
-                              <td className="py-4 px-2 text-right">
-                                {bid.status === 'Approved' ? (
-                                  <button 
-                                    onClick={() => handleSelectBid(bid)}
-                                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 font-bold rounded-lg text-xs transition-all active:scale-95"
-                                  >
-                                    Accept Offer
-                                  </button>
-                                ) : (
-                                  <span className="text-xs text-slate-500">Policy declined</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-xl border border-emerald-900/50 bg-emerald-950/20 px-4 py-3">
+                      <p className="text-xs text-emerald-100"><strong>Borrower-first pricing.</strong> Offers are ranked by true APR so the lowest total borrowing cost comes first.</p>
+                      <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold">Lowest true APR first</span>
                     </div>
+                    {bids.map((bid) => (
+                      <article key={bid.id} className={`rounded-2xl border p-5 transition-colors ${bid.status === 'Approved' ? 'border-slate-700 bg-slate-900/60 hover:border-indigo-700' : 'border-slate-850 bg-slate-900/20 opacity-70'}`}>
+                        <div className="flex flex-col gap-5">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex items-start gap-3 min-w-0">
+                              <span className={`shrink-0 w-9 h-9 rounded-full flex items-center justify-center text-xs font-extrabold ${bid.status === 'Approved' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-500'}`}>
+                                {bid.status === 'Approved' ? `#${bid.rank}` : '—'}
+                              </span>
+                              <div>
+                                <h3 className="font-bold text-slate-100 leading-tight">{bid.lenderName}</h3>
+                                <p className="mt-1 text-[11px] leading-5 text-slate-400 max-w-xl">{bid.decisionReason}</p>
+                              </div>
+                            </div>
+                            <span className={`shrink-0 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-wider ${bid.status === 'Approved' ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-850 text-slate-500 border border-slate-800'}`}>{bid.status}</span>
+                          </div>
+
+                          {bid.status === 'Approved' && (
+                            <>
+                              <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+                                <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-3"><span className="block text-[9px] uppercase tracking-wider text-slate-500">True APR</span><strong className="block mt-1 font-mono text-lg text-emerald-400">{bid.calculatedAPR.toFixed(2)}%</strong></div>
+                                <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-3"><span className="block text-[9px] uppercase tracking-wider text-slate-500">Monthly EMI</span><strong className="block mt-1 font-mono text-lg text-slate-100">₹{bid.monthlyEMI.toLocaleString()}</strong></div>
+                                <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-3"><span className="block text-[9px] uppercase tracking-wider text-slate-500">Offered tenure</span><strong className="block mt-1 font-mono text-lg text-slate-100">{bid.offeredTenureMonths} mo</strong>{bid.offeredTenureMonths !== bid.requestedTenureMonths && <span className="text-[9px] text-amber-400">Adjusted for affordability</span>}</div>
+                                <div className="rounded-xl bg-slate-950/80 border border-slate-800 p-3"><span className="block text-[9px] uppercase tracking-wider text-slate-500">Projected / max DTI</span><strong className="block mt-1 font-mono text-lg text-slate-100">{bid.projectedDtiPercent?.toFixed(2)}% <span className="text-slate-600">/</span> {bid.maxDtiPercent ?? '—'}%</strong></div>
+                              </div>
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
+                                <p className="text-[11px] text-slate-400">Interest <strong className="text-slate-200">{bid.baseInterestRate.toFixed(2)}%</strong>{bid.marketDiscountPercent ? <> · <strong className="text-emerald-400">{bid.marketDiscountPercent.toFixed(2)} points below market benchmark</strong></> : null}</p>
+                                <button onClick={() => handleSelectBid(bid)} className="w-full sm:w-auto px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs transition-all active:scale-95">Review offer</button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </article>
+                    ))}
                   </div>
                 )}
 
@@ -752,23 +756,19 @@ export default function Home() {
                   <span className="font-bold text-slate-800">₹{selectedBid.processingFeePercent > 0 ? (requiredAmount * (selectedBid.processingFeePercent / 100)).toLocaleString() : '0'}</span>
                 </div>
                 <div className="flex justify-between border-b border-slate-200 pb-2">
-                  <span className="text-xs text-slate-500 font-bold">3. OptiRate Platform Fee ({selectedBid.platformFeePercent || 0}%):</span>
-                  <span className="font-bold text-slate-800">₹{(requiredAmount * ((selectedBid.platformFeePercent || 0) / 100)).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between border-b border-slate-200 pb-2">
-                  <span className="text-xs text-slate-500 font-bold">4. Lender Interest Rate:</span>
+                  <span className="text-xs text-slate-500 font-bold">3. Lender Interest Rate:</span>
                   <span className="font-bold text-emerald-600">{selectedBid.baseInterestRate}% p.a.</span>
                 </div>
                 <div className="flex justify-between border-b-2 border-slate-300 pb-2 bg-slate-100/50 -mx-3 px-3 rounded">
-                  <span className="text-xs text-slate-600 font-bold">5. True APR including all upfront fees:</span>
+                  <span className="text-xs text-slate-600 font-bold">4. True APR including lender charges:</span>
                   <span className="font-extrabold text-indigo-700">{selectedBid.calculatedAPR}%</span>
                 </div>
                 <div className="flex justify-between pt-1">
-                  <span className="text-xs text-slate-500 font-bold">6. Monthly EMI Obligation:</span>
+                  <span className="text-xs text-slate-500 font-bold">5. Monthly EMI Obligation:</span>
                   <span className="font-bold text-slate-800">₹{selectedBid.monthlyEMI.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between pt-1">
-                  <span className="text-xs text-slate-500 font-bold">7. Offered tenure / projected DTI:</span>
+                  <span className="text-xs text-slate-500 font-bold">6. Offered tenure / projected DTI:</span>
                   <span className="font-bold text-slate-800">{selectedBid.offeredTenureMonths || tenureMonths} months / {selectedBid.projectedDtiPercent?.toFixed(2)}%</span>
                 </div>
                 {selectedBid.marketDiscountPercent !== undefined && selectedBid.marketDiscountPercent > 0 && (
@@ -800,10 +800,12 @@ export default function Home() {
                 <button onClick={() => void handleFinalizeAgreement()} disabled={loading} className="px-6 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-sm transition-colors shadow-lg disabled:opacity-50">
                   Check Setu Signature & Continue
                 </button>
-              ) : (
+              ) : hostedESignAvailable ? (
                 <button onClick={() => void handleTriggerESign('setu_hosted')} disabled={loading} className="px-6 py-3 bg-slate-900 hover:bg-slate-850 text-white font-bold rounded-xl text-sm transition-colors shadow-lg disabled:opacity-50">
-                  Setu Hosted eSign &rarr;
+                  Setu Hosted eSign ({hostedESignEnvironment}) &rarr;
                 </button>
+              ) : (
+                <span className="max-w-[220px] text-right text-[10px] leading-4 text-slate-500">Hosted Setu eSign becomes available after all five Vercel eSign variables are configured.</span>
               )}
             </div>
           </div>

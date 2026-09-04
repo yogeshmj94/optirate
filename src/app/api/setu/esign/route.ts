@@ -7,6 +7,17 @@ const headers = () => ({
   'x-product-instance-id': process.env.SETU_ESIGN_INSTANCE_ID || '',
 });
 
+const requiredConfig = ['SETU_ESIGN_CLIENT_ID', 'SETU_ESIGN_CLIENT_SECRET', 'SETU_ESIGN_INSTANCE_ID', 'SETU_ESIGN_DOCUMENT_ID', 'SETU_ESIGN_REDIRECT_URL'] as const;
+
+export async function GET() {
+  const missing = requiredConfig.filter((key) => !process.env[key]);
+  return NextResponse.json({
+    hostedAvailable: missing.length === 0,
+    environment: (process.env.SETU_ESIGN_BASE_URL || 'https://dg-sandbox.setu.co').includes('sandbox') ? 'sandbox' : 'production',
+    missing,
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -32,7 +43,9 @@ export async function POST(request: Request) {
       });
       const data = await response.json();
       if (!response.ok) return NextResponse.json({ error: data?.error?.detail || 'Setu eSign initiation failed', provider: data }, { status: response.status });
-      return NextResponse.json(data);
+      const signingUrl = data?.signers?.[0]?.url || data?.url || data?.signingUrl || data?.redirectUrl;
+      if (!data?.id || !signingUrl) return NextResponse.json({ error: 'Setu created an incomplete signature response', providerStatus: data?.status }, { status: 502 });
+      return NextResponse.json({ ...data, signingUrl });
     }
     if (body.action === 'STATUS' && body.id) {
       const response = await fetch(`${process.env.SETU_ESIGN_BASE_URL || 'https://dg-sandbox.setu.co'}/api/signature/${encodeURIComponent(body.id)}`, { headers: headers(), cache: 'no-store' });

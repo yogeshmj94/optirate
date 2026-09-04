@@ -32,7 +32,7 @@ export interface LoanBid {
   validUntil?: string;
   decisionReason?: string;
   riskTier?: 'LOW' | 'MEDIUM' | 'HIGH';
-  platformFeePercent?: number;
+  lenderCommissionPercent?: number; // Paid by the lender; never added to borrower pricing.
   marketBenchmarkRate?: number;
   marketDiscountPercent?: number;
   requestedTenureMonths?: number;

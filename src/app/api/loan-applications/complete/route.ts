@@ -55,7 +55,7 @@ export async function POST(request: Request) {
               projectedDtiPercent: decision.projectedDtiPercent,
               maxDtiPercent: decision.maxDtiPercent,
               monthlyEMI: decision.monthlyEMI,
-              platformFeePercent: decision.platformFeePercent,
+              lenderCommissionPercent: decision.lenderCommissionPercent,
               marketBenchmarkRate: decision.marketBenchmarkRate,
               marketDiscountPercent: decision.marketDiscountPercent,
             })) as Prisma.InputJsonValue,
@@ -90,12 +90,12 @@ export async function POST(request: Request) {
           direction: 'CREDIT',
         },
       });
-      if ((body.platformFeePercent || 0) > 0) {
+      if ((body.lenderCommissionPercent || 0) > 0) {
         await tx.platformLedgerEntry.create({
           data: {
             loanApplicationId: createdApplication.id,
             entryType: 'PLATFORM_FEE',
-            amount: body.amount * (body.platformFeePercent || 0) / 100,
+            amount: body.amount * (body.lenderCommissionPercent || 0) / 100,
             direction: 'CREDIT',
           },
         });

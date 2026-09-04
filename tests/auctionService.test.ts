@@ -40,17 +40,18 @@ test('progressive banks give disciplined no-history earners reasonably priced of
   assert.ok(progressive.every((bid) => bid.status === 'Approved'));
   assert.ok(progressive.every((bid) => bid.baseInterestRate <= 17));
   assert.ok(progressive.some((bid) => bid.baseInterestRate <= 16.25));
-  assert.ok(progressive.every((bid) => bid.platformFeePercent === 1.5));
+  assert.ok(progressive.every((bid) => (bid.lenderCommissionPercent || 0) > 0));
+  assert.ok(progressive.every((bid) => bid.calculatedAPR < 18));
 });
 
-test('small-business specialist prices 1.5 points below the documented 14 percent market floor', async () => {
+test('small-business specialist prices 2 points below the documented 14 percent market floor', async () => {
   const bids = await runReverseAuction({ fullName: 'Small Business Owner', requiredAmount: 100000, tenureMonths: 24, creditScore: 0, monthlyIncome: 161667, monthlyExpense: 100333, cashflowRiskScore: 0, cashflowRiskAction: 'ALLOW_AUCTION', borrowerSegment: 'small_business_disciplined' });
   const udyam = bids.find((bid) => bid.lenderId === 'lender_06');
   assert.equal(udyam?.status, 'Approved');
-  assert.equal(udyam?.baseInterestRate, 12.5);
+  assert.equal(udyam?.baseInterestRate, 12);
   assert.equal(udyam?.marketBenchmarkRate, 14);
-  assert.equal(udyam?.marketDiscountPercent, 1.5);
-  assert.equal(udyam?.platformFeePercent, 1.5);
+  assert.equal(udyam?.marketDiscountPercent, 2);
+  assert.equal(udyam?.lenderCommissionPercent, 1.5);
 });
 
 test('banks can extend tenure independently to bring projected DTI within policy', async () => {

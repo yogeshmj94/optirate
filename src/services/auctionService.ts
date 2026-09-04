@@ -2,15 +2,15 @@ import { calculateTrueAPR } from '../lib/aprCalculator';
 import { BankSchemaAdapter, type StandardBorrowerProfile } from './bankAdapterService';
 import type { LoanBid } from '../types/lending';
 
-type BankPolicy = { id: string; name: string; path: string; baseRate: number; feePercent: number; maxDti: number | null; maxTenure: number; riskAppetite: 'CONSERVATIVE' | 'BALANCED' | 'HIGH'; segment?: 'GIG' | 'BUSINESS' | 'GENERAL' };
+type BankPolicy = { id: string; name: string; path: string; baseRate: number; feePercent: number; commissionPercent: number; maxDti: number | null; maxTenure: number; riskAppetite: 'CONSERVATIVE' | 'BALANCED' | 'HIGH'; segment?: 'GIG' | 'BUSINESS' | 'GENERAL' };
 
 const BANKS: BankPolicy[] = [
-  { id: 'lender_01', name: 'Aster National Bank', path: '/banks/aster/preapproved-offers', baseRate: 10.25, feePercent: 0.5, maxDti: null, maxTenure: 60, riskAppetite: 'CONSERVATIVE' },
-  { id: 'lender_02', name: 'Nova Digital Bank', path: '/banks/nova/preapproved-offers', baseRate: 16.25, feePercent: 0.25, maxDti: 0.55, maxTenure: 60, riskAppetite: 'BALANCED', segment: 'GENERAL' },
-  { id: 'lender_03', name: 'Summit Opportunity Bank', path: '/banks/summit/preapproved-offers', baseRate: 16.75, feePercent: 0.5, maxDti: 0.65, maxTenure: 72, riskAppetite: 'HIGH', segment: 'GENERAL' },
-  { id: 'lender_04', name: 'FlowTrust Cashflow Bank', path: '/banks/flowtrust/preapproved-offers', baseRate: 16.0, feePercent: 0.25, maxDti: 0.5, maxTenure: 60, riskAppetite: 'BALANCED', segment: 'GENERAL' },
-  { id: 'lender_05', name: 'FlexWork Bank', path: '/banks/flexwork/preapproved-offers', baseRate: 16.5, feePercent: 0.25, maxDti: 0.6, maxTenure: 60, riskAppetite: 'BALANCED', segment: 'GIG' },
-  { id: 'lender_06', name: 'Udyam Growth Bank', path: '/banks/udyam/preapproved-offers', baseRate: 12.5, feePercent: 0.5, maxDti: 0.55, maxTenure: 72, riskAppetite: 'BALANCED', segment: 'BUSINESS' },
+  { id: 'lender_01', name: 'Aster National Bank', path: '/banks/aster/preapproved-offers', baseRate: 10.25, feePercent: 0.5, commissionPercent: 1, maxDti: null, maxTenure: 60, riskAppetite: 'CONSERVATIVE' },
+  { id: 'lender_02', name: 'Nova Digital Bank', path: '/banks/nova/preapproved-offers', baseRate: 16.25, feePercent: 0.25, commissionPercent: 1.25, maxDti: 0.55, maxTenure: 60, riskAppetite: 'BALANCED', segment: 'GENERAL' },
+  { id: 'lender_03', name: 'Summit Opportunity Bank', path: '/banks/summit/preapproved-offers', baseRate: 16.75, feePercent: 0.5, commissionPercent: 1.5, maxDti: 0.65, maxTenure: 72, riskAppetite: 'HIGH', segment: 'GENERAL' },
+  { id: 'lender_04', name: 'FlowTrust Cashflow Bank', path: '/banks/flowtrust/preapproved-offers', baseRate: 16.0, feePercent: 0.25, commissionPercent: 1.25, maxDti: 0.5, maxTenure: 60, riskAppetite: 'BALANCED', segment: 'GENERAL' },
+  { id: 'lender_05', name: 'FlexWork Bank', path: '/banks/flexwork/preapproved-offers', baseRate: 16.0, feePercent: 0.25, commissionPercent: 1.5, maxDti: 0.6, maxTenure: 60, riskAppetite: 'BALANCED', segment: 'GIG' },
+  { id: 'lender_06', name: 'Udyam Growth Bank', path: '/banks/udyam/preapproved-offers', baseRate: 12.0, feePercent: 0.5, commissionPercent: 1.5, maxDti: 0.55, maxTenure: 72, riskAppetite: 'BALANCED', segment: 'BUSINESS' },
 ];
 
 const emi = (principal: number, annualRate: number, months: number): number => {
@@ -28,7 +28,11 @@ const localDecision = (bank: BankPolicy, profile: StandardBorrowerProfile) => {
     ? 0
     : Math.max(0, 720 - profile.creditScore) * (highAppetite ? 0.018 : 0.012);
   const premium = profile.cashflowRiskScore * (highAppetite ? 0.055 : 0.025) + bureauPremium;
-  const rate = Number((bank.baseRate + premium).toFixed(2));
+  const marketBenchmark = isBusiness ? 14 : 18;
+  const disciplinedThinFile = profile.creditScore === 0 && profile.cashflowRiskScore <= 30;
+  const specialistMatch = (bank.segment === 'GIG' && isGig) || (bank.segment === 'BUSINESS' && isBusiness);
+  const thinFileCeiling = marketBenchmark - (specialistMatch ? 2 : 1.5);
+  const rate = Number((disciplinedThinFile ? Math.min(bank.baseRate + premium, thinFileCeiling) : bank.baseRate + premium).toFixed(2));
   const fixedObligations = profile.fixedMonthlyObligations || 0;
   const currentDti = fixedObligations / Math.max(profile.monthlyIncome, 1);
   const candidateTenures = Array.from(new Set([profile.tenureMonths, 12, 18, 24, 36, 48, 60, 72]))
@@ -86,18 +90,17 @@ export async function runReverseAuction(profile: StandardBorrowerProfile): Promi
     }
     const normalized = normalize(bank, nativeResponse, profile.requiredAmount);
     const approved = normalized.status === 'Approved' && decision.approved;
-    const platformFeePercent = profile.creditScore === 0 ? 1.5 : 1.0;
     const monthlyPayment = approved ? Math.round(emi(profile.requiredAmount, normalized.interestRate, decision.offeredTenure)) : 0;
-    const totalPayout = approved ? Math.round(monthlyPayment * decision.offeredTenure + profile.requiredAmount * (normalized.feePercent + platformFeePercent) / 100) : 0;
+    const totalPayout = approved ? Math.round(monthlyPayment * decision.offeredTenure + profile.requiredAmount * normalized.feePercent / 100) : 0;
     const marketBenchmarkRate = profile.borrowerSegment === 'small_business_disciplined' ? 14 : 18;
     return {
       id: `bid_${bank.id}_${crypto.randomUUID()}`, offerId: `offer_${bank.id}_${crypto.randomUUID()}`, lenderId: bank.id, lenderName: bank.name,
       baseInterestRate: approved ? normalized.interestRate : 0, processingFeePercent: approved ? normalized.feePercent : 0,
-      calculatedAPR: approved ? calculateTrueAPR(normalized.interestRate, normalized.feePercent + platformFeePercent, decision.offeredTenure) : 0,
+      calculatedAPR: approved ? calculateTrueAPR(normalized.interestRate, normalized.feePercent, decision.offeredTenure) : 0,
       monthlyEMI: monthlyPayment, totalPayout, rank: 999,
       status: approved ? 'Approved' : 'Rejected', validUntil: new Date(Date.now() + 15 * 60_000).toISOString(),
       riskTier: profile.cashflowRiskScore >= 65 ? 'HIGH' : profile.cashflowRiskScore >= 36 ? 'MEDIUM' : 'LOW',
-      platformFeePercent, marketBenchmarkRate, marketDiscountPercent: approved ? Number((marketBenchmarkRate - normalized.interestRate).toFixed(2)) : 0,
+      lenderCommissionPercent: bank.commissionPercent, marketBenchmarkRate, marketDiscountPercent: approved ? Number((marketBenchmarkRate - normalized.interestRate).toFixed(2)) : 0,
       requestedTenureMonths: profile.tenureMonths, offeredTenureMonths: decision.offeredTenure,
       currentDtiPercent: Number((decision.currentDti * 100).toFixed(2)), projectedDtiPercent: Number((decision.projectedDti * 100).toFixed(2)), maxDtiPercent: decision.maxDti === null ? null : decision.maxDti * 100,
       decisionReason: `${decision.reason}; response source: ${source}`,
